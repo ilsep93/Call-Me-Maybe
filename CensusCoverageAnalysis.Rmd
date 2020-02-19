@@ -1,0 +1,272 @@
+---
+title: "Who isn't counted: Noncoverage error in Mexican cell-phone surveys"
+author: "Ilse Paniagua"
+date: "1/17/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(haven)
+library(data.table)
+library(dtplyr)
+library(magrittr)
+library(janitor)
+library(dplyr)
+library(recipes)
+```
+
+# Reading datasets
+
+```{r}
+#Population totals per state, for post-stratification adjustments
+#iter <- read.dbf(file="ITER_NALDBF10.dbf")
+hh <- as.data.table(read_stata(file="DUMMY_VIVIENDAS.dta")) %>%
+  janitor::clean_names()
+```
+I will use the ITER data to get population level estimates of cellphone and landline coverage. The microdata at the household level will be used to estimate coverage error.
+
+# Data Cleaning
+
+## Households
+```{r}
+#Keeping only variables for analysis
+#Converting the key variables from character to numeric
+hh_df <- hh %>%
+  janitor::clean_names() %>% as.data.frame()
+
+hh_df %<>% select(!!c(2, 8, 13:29, 34, 36)) %>%
+  mutate_if(is.character, as.numeric)
+
+#Recoding to 1 or 0
+hh_df %<>%
+  mutate_at(.vars = vars(electri, sersan, radio, refrig, autoprop, telefono, internet), funs(recode(., `2`=0, `3`=0))) %>%
+  mutate_at(.vars = vars(televi, lavadora, compu, celular), funs(recode(., `3`=1, `4`=0)))
+
+#Recoding 9 and 99 to missing
+hh_df %<>%
+  mutate_at(.vars = vars(telefono, celular, internet, tipohog, pisos, electri, disagu, conagu, drenaje, radio, televi, telefono, refrig, sersan, lavadora, compu), funs(na_if(., 9))) %>%
+  mutate_at(.vars = vars(cuadorm, totcuart), funs(na_if(., 99)))
+
+#Recoding to factor
+hh_df %<>%
+  mutate_at(.vars = vars(conagu, disagu, drenaje, tipohog, pisos), funs(as.factor))
+
+#Making dummy variables for continous variables
+hh_df <- recipe(id_viv ~., data=hh_df) %>%
+  step_dummy(conagu, one_hot=TRUE) %>%
+  step_dummy(disagu, one_hot=TRUE) %>%
+  step_dummy(drenaje, one_hot=TRUE) %>%
+  step_dummy(tipohog, one_hot=TRUE) %>%
+  step_dummy(pisos, one_hot=TRUE) %>%
+  prep(training=hh_df) %>%
+  bake(new_data = hh_df)
+```
+
+## Individuals
+
+# Population statistics, per state
+
+ENT 14 is Jalisco
+ENT 21 is Puebla
+
+I need a table with summary statistics for each of the questions, by state.
+
+```{r}
+#Summary statistics
+t <- hh_df %>%
+  select(-id_viv) %>%
+  group_by(ent) %>%
+  summarise_all(.funs = mean, na.rm=TRUE) %>%
+  t() %>%
+  as.data.frame()
+
+colnames(t) <- c("Jalisco", "Puebla")
+
+setDT(t, keep.rownames = "variable")
+```
+
+## Cell-phone statistics
+
+```{r}
+cell_only <- hh_df %>%
+  filter(celular==1) %>%
+  select(-id_viv) %>%
+  group_by(ent) %>%
+  summarise_all(.funs = mean, na.rm=TRUE) %>%
+  t() %>%
+  as.data.frame()
+
+colnames(cell_only) <- c("Jalisco", "Puebla")
+
+setDT(cell_only, keep.rownames = "variable")
+  
+```
+
+## Landline statistics
+
+```{r}
+landline_only <- hh_df %>%
+  filter(telefono==1) %>%
+  select(-id_viv) %>%
+  group_by(ent) %>%
+  summarise_all(.funs = mean, na.rm=TRUE) %>%
+  t() %>%
+  as.data.frame()
+
+colnames(landline_only) <- c("Jalisco", "Puebla")
+
+setDT(landline_only, keep.rownames = "variable")
+```
+
+# Individual characterisitcs
+
+```{r}
+pp <- as.data.table(read_stata(file="DUMMY_PERSONAS.dta")) %>%
+  janitor::clean_names()
+```
+
+-Number 10 and under (child)
+-Number 11-25 (youth)
+-Number 25-65 (adults)
+-Number 66 and up (seniors)
+-Someone in household receives each type of dhsersal1 or 2 (need to make factor)
+-all the discaps
+-hlengua
+-asisten
+-nivacad
+-alfabet
+-estcon
+-numhij
+-edad_jefe
+
+```{r}
+pp_df <- pp %>% select(!!c(2,11:13, 17:21, 28, 32:35, 38, 40, 46)) %>%
+  mutate_if(is.character, as.numeric)
+
+#Recoding to 1 or 0
+pp_df %<>%
+  mutate_at(.vars = vars(sexo, asisten, alfabet, hlengua), funs(recode(., `2`=0, `3`=0))) %>%
+  mutate_at(.vars = vars(), funs(recode(., `3`=1, `4`=0))) %>%
+  #Recoding all married statuses to be same
+  mutate_at(.vars = vars(estcon), funs(recode(., `6`=5, `7`=5))) %>%
+  #Discapacitado variables
+  mutate_at(.vars = vars(discap1), funs(recode(., `10`=1))) %>%
+    mutate_at(.vars = vars(discap2), funs(recode(., `11`=1)))
+
+#Recoding 9 and 99 to missing
+pp_df %<>%
+  mutate_at(.vars = vars(dhsersal1, dhsersal2, alfabet, estcon, asisten, hlengua), funs(na_if(., 9))) %>%
+  mutate_at(.vars = vars(escolari, nivacad, numhij), funs(na_if(., 99))) %>%
+  mutate_at(.vars = vars(edad, edad_jefe), funs(na_if(., 999))) %>%
+  mutate_at(.vars = vars(numhij), funs(na_if(., 98)))
+
+#Discap NA to 0
+pp_df %<>%
+  mutate_at(.vars = vars(discap1, discap2), funs(replace(., is.na(.),0)))
+
+#Recoding dhsersal, if one is 1 then both are 1
+pp_df %<>%
+  mutate(dhsersal_imss = case_when(
+    dhsersal1==1 | dhsersal2 == 1 ~ 1,
+    TRUE ~ 0),
+    dhsersal_isste = case_when(
+    dhsersal1==3 | dhsersal1 ==3 ~ 1,
+    dhsersal2==4 | dhsersal2==4 ~ 1,
+    TRUE ~ 0)) %>%
+    mutate(dhsersal_private = case_when(
+      dhsersal1==5 | dhsersal2==5 ~ 1,
+      TRUE ~ 0)) %>%
+    mutate(dhsersal_noinsu = case_when(
+      dhsersal1==8 | dhsersal2==8 ~ 1,
+      TRUE ~ 0))
+
+#Creating education variables
+pp_df %<>%
+  mutate(primary = case_when(
+    nivacad==2 | nivacad==6 ~ 1,
+    TRUE ~ 0)) %>%
+  mutate(secondary = case_when(
+    nivacad==3 | nivacad==7 ~ 1,
+    TRUE ~ 0)) %>%
+  mutate(highschool = case_when(
+    nivacad==4 | nivacad==8 ~ 1,
+    TRUE ~ 0))
+
+#Civil status (estcon)
+#Recoding to factor
+hh_df %<>%
+  mutate_at(.vars = vars(estcon), funs(as.factor))
+
+#Making dummy variables for continous variables
+hh_df <- recipe(id_viv ~., data=hh_df) %>%
+  step_dummy(estcon, one_hot=TRUE) %>%
+  prep(training=hh_df) %>%
+  bake(new_data = hh_df)
+
+#Removing unnecessary variables
+pp_df %<>% select(-dhsersal1, -dhsersal2, -otrarel_c, -escolari, -nivacad, -estcont)
+```
+
+```{r}
+summary(pp_df)
+```
+
+## Individual: Population summary
+
+Table with summary statistics for each of the questions, by state.
+
+```{r}
+#Summary statistics
+s <- pp_df %>%
+  select(-id_viv) %>%
+  group_by(ent) %>%
+  summarise_all(.funs = mean, na.rm=TRUE) %>%
+  t() %>%
+  as.data.frame()
+
+colnames(s) <- c("Jalisco", "Puebla")
+
+setDT(s, keep.rownames = "variable")
+```
+
+## Individual: Cell-phone statistics
+
+I have to merge the individual and household datasets to see which individuals are in a household with a cellphone.
+
+```{r}
+pp_cell_only <- hh_df %>%
+  select(id_viv, ent, celular) %>% 
+  inner_join(pp_df, by = c("id_viv" , "ent")) %>%
+  filter(celular==1) %>%
+  select(-id_viv) %>%
+  group_by(ent) %>%
+  summarise_all(.funs = mean, na.rm=TRUE) %>%
+  t() %>%
+  as.data.frame()
+
+colnames(cell_only) <- c("Jalisco", "Puebla")
+
+setDT(cell_only, keep.rownames = "variable")
+#All obs join
+#anti_join(hh_df, pp_df, by="id_viv")
+```
+
+### Individual: Landline
+```{r}
+pp_landline_only <- hh_df %>%
+  select(id_viv, ent, telefono) %>% 
+  inner_join(pp_df, by = c("id_viv" , "ent")) %>%
+  filter(telefono==1) %>%
+  select(-id_viv) %>%
+  group_by(ent) %>%
+  summarise_all(.funs = mean, na.rm=TRUE) %>%
+  t() %>%
+  as.data.frame()
+
+colnames(pp_landline_only) <- c("Jalisco", "Puebla")
+
+setDT(pp_landline_only, keep.rownames = "variable")
+  
+```
