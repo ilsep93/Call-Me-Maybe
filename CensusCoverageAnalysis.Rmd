@@ -17,7 +17,7 @@ library(dplyr)
 library(recipes)
 ```
 
-# Reading datasets
+### Reading datasets
 
 ```{r}
 #Population totals per state, for post-stratification adjustments
@@ -27,9 +27,8 @@ hh <- as.data.table(read_stata(file="DUMMY_VIVIENDAS.dta")) %>%
 ```
 I will use the ITER data to get population level estimates of cellphone and landline coverage. The microdata at the household level will be used to estimate coverage error.
 
-# Data Cleaning
+# Data Cleaning: Household-Level Data
 
-## Households
 ```{r}
 #Keeping only variables for analysis
 #Converting the key variables from character to numeric
@@ -64,63 +63,67 @@ hh_df <- recipe(id_viv ~., data=hh_df) %>%
   bake(new_data = hh_df)
 ```
 
-## Individuals
-
-# Population statistics, per state
+# Population: Household Summary Statistics
 
 ENT 14 is Jalisco
 ENT 21 is Puebla
 
 I need a table with summary statistics for each of the questions, by state.
 
-```{r}
-#Summary statistics
-t <- hh_df %>%
-  select(-id_viv) %>%
-  group_by(ent) %>%
-  summarise_all(.funs = mean, na.rm=TRUE) %>%
-  t() %>%
-  as.data.frame()
-
-colnames(t) <- c("Jalisco", "Puebla")
-
-setDT(t, keep.rownames = "variable")
-```
-
-## Cell-phone statistics
+I will calculate the mean, standard deviation, and number of responses for each survey estimate.
 
 ```{r}
-cell_only <- hh_df %>%
-  filter(celular==1) %>%
+pop_hh <- bind_cols(
+ #Number of observations
+   hh_df %>%
   select(-id_viv) %>%
   group_by(ent) %>%
-  summarise_all(.funs = mean, na.rm=TRUE) %>%
-  t() %>%
+  summarise_all(funs(n())),
+  #Mean and var
+  hh_df %>%
+  select(-id_viv) %>%
+  group_by(ent) %>%
+  summarise_all(funs(mean, var), na.rm=T)) %>%
+    t() %>%
   as.data.frame()
 
-colnames(cell_only) <- c("Jalisco", "Puebla")
+colnames(pop_hh) <- c("Jalisco", "Puebla")
 
-setDT(cell_only, keep.rownames = "variable")
+setDT(pop_hh, keep.rownames = "variable")
+
+pop_hh %<>% arrange(variable)
   
 ```
 
-## Landline statistics
+## Household: Cell-only
 
+Household-level summary statistics for households with a cell-phone.
 ```{r}
-landline_only <- hh_df %>%
-  filter(telefono==1) %>%
+hh_cell_only <- bind_cols(
+ #Number of observations
+  hh_df %>%
   select(-id_viv) %>%
+  filter(celular==1) %>%  
   group_by(ent) %>%
-  summarise_all(.funs = mean, na.rm=TRUE) %>%
-  t() %>%
+  summarise_all(funs(n())),
+  #Mean and var
+  hh_df %>%
+  select(-id_viv) %>%
+  filter(celular==1) %>%
+  group_by(ent) %>%
+  summarise_all(funs(mean, var), na.rm=T)) %>%
+    t() %>%
   as.data.frame()
 
-colnames(landline_only) <- c("Jalisco", "Puebla")
+colnames(hh_cell_only) <- c("Jalisco", "Puebla")
 
-setDT(landline_only, keep.rownames = "variable")
+setDT(hh_cell_only, keep.rownames = "variable")
+
+hh_cell_only %<>% arrange(variable)
+  
 ```
 
-# Individual characterisitcs
+# Data Cleaning: Individual-Level Data
 
 ```{r}
 pp <- as.data.table(read_stata(file="DUMMY_PERSONAS.dta")) %>%
@@ -213,22 +216,32 @@ pp_df %<>% select(-dhsersal1, -dhsersal2, -otrarel_c, -escolari, -nivacad, -estc
 summary(pp_df)
 ```
 
-## Individual: Population summary
+## Population: Individual Summary Statistics
 
 Table with summary statistics for each of the questions, by state.
 
 ```{r}
-#Summary statistics
-s <- pp_df %>%
+pop_ind <- bind_cols(
+ #Number of observations
+  pp_df %>%
   select(-id_viv) %>%
   group_by(ent) %>%
-  summarise_all(.funs = mean, na.rm=TRUE) %>%
-  t() %>%
+  summarise_all(funs(n()))
+  ,
+  #Mean and var
+  pp_df %>%
+  select(-id_viv) %>%
+  group_by(ent) %>%
+  summarise_all(funs(mean, var), na.rm=T)
+  ) %>%
+    t() %>%
   as.data.frame()
 
-colnames(s) <- c("Jalisco", "Puebla")
+colnames(pop_ind) <- c("Jalisco", "Puebla")
 
-setDT(s, keep.rownames = "variable")
+setDT(pop_ind, keep.rownames = "variable")
+
+pop_ind %<>% arrange(variable)
 ```
 
 ## Individual: Cell-phone statistics
@@ -236,37 +249,93 @@ setDT(s, keep.rownames = "variable")
 I have to merge the individual and household datasets to see which individuals are in a household with a cellphone.
 
 ```{r}
-pp_cell_only <- hh_df %>%
+pp_cell_only <- 
+ bind_cols(
+  #Number of obs
+  hh_df %>%
   select(id_viv, ent, celular) %>% 
   inner_join(pp_df, by = c("id_viv" , "ent")) %>%
   filter(celular==1) %>%
   select(-id_viv) %>%
   group_by(ent) %>%
-  summarise_all(.funs = mean, na.rm=TRUE) %>%
+  summarise_all(funs(n()))
+  ,
+  #Mean and var
+  hh_df %>%
+  select(id_viv, ent, celular) %>% 
+  inner_join(pp_df, by = c("id_viv" , "ent")) %>%
+  filter(celular==1) %>%
+  select(-id_viv) %>%
+  group_by(ent) %>%
+  summarise_all(funs(mean, var), na.rm=T)
+) %>%
   t() %>%
   as.data.frame()
+colnames(pp_cell_only) <- c("Jalisco", "Puebla")
 
-colnames(cell_only) <- c("Jalisco", "Puebla")
+setDT(pp_cell_only, keep.rownames = "variable")
 
-setDT(cell_only, keep.rownames = "variable")
+pp_cell_only %<>% arrange(variable)
 #All obs join
 #anti_join(hh_df, pp_df, by="id_viv")
 ```
 
-### Individual: Landline
+# Difference of means
+
+I now calculate the difference in survey statistics between households with a cell-phone and the general population, by state.
 ```{r}
-pp_landline_only <- hh_df %>%
-  select(id_viv, ent, telefono) %>% 
-  inner_join(pp_df, by = c("id_viv" , "ent")) %>%
-  filter(telefono==1) %>%
-  select(-id_viv) %>%
-  group_by(ent) %>%
-  summarise_all(.funs = mean, na.rm=TRUE) %>%
-  t() %>%
-  as.data.frame()
-
-colnames(pp_landline_only) <- c("Jalisco", "Puebla")
-
-setDT(pp_landline_only, keep.rownames = "variable")
+#Joining means for population and cell-only
+diff_means <- bind_cols (
+  pop_hh,
+  hh_cell_only
+) %>%
+  select(-variable1) %>%
+  #Renaming variables for clarity
+  rename(jalisco_pop = Jalisco, puebla_pop= Puebla, jalisco_cell = Jalisco1, puebla_cell= Puebla1) %>%
+  #Keep only means
+  filter(grepl("mean", variable)) %>%
+  mutate(diff_jalisco = jalisco_cell- jalisco_pop,
+         diff_puebla = puebla_cell - puebla_pop)
   
+```
+
+I also calculate the standard error of the difference. The formula is:
+
+$SE_{cell - pop} = \sqrt{\frac{\sigma^2_{cell}}{n_{cell}} + \frac{\sigma^2_{pop}}{n_{pop}}} $
+
+The number of observations is the same for the population and subset data.
+
+n_pop =143090
+n_cell=91646
+
+```{r}
+#Standard error of difference
+diff_se <- bind_cols (
+  pop_hh,
+  hh_cell_only
+) %>%
+  select(-variable1) %>%
+  #Renaming variables for clarity
+  rename(jalisco_pop = Jalisco, puebla_pop= Puebla, jalisco_cell = Jalisco1, puebla_cell= Puebla1) %>%
+  #Keep only means
+  filter(grepl("var", variable)) %>%
+  mutate(se_jalisco = sqrt((jalisco_cell/91646) + (jalisco_pop/143090)),
+        se_puebla = sqrt((puebla_cell/91646) + (puebla_pop/143090)))
+
+```
+
+## Testing normality of the data
+
+t-tests require that the data be normally distributed. I will test this with the Shapiro-Wilk test.
+
+```{r}
+shapiro.test(hh_df$cuadorm)
+```
+
+# t-test for difference in means
+
+
+
+```{r}
+
 ```
