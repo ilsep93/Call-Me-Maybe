@@ -15,6 +15,8 @@ library(magrittr)
 library(janitor)
 library(dplyr)
 library(recipes)
+library(stringr)
+#library(polotrix)
 ```
 
 ### Reading datasets
@@ -27,13 +29,18 @@ hh <- as.data.table(read_stata(file="DUMMY_VIVIENDAS.dta")) %>%
 ```
 I will use the ITER data to get population level estimates of cellphone and landline coverage. The microdata at the household level will be used to estimate coverage error.
 
+Defining %ni% function.
+```{r}
+'%ni%' <- Negate('%in%')
+```
+
+
 # Data Cleaning: Household-Level Data
 
 ```{r}
 #Keeping only variables for analysis
 #Converting the key variables from character to numeric
-hh_df <- hh %>%
-  janitor::clean_names() %>% as.data.frame()
+hh_df <- hh %>% as.data.frame()
 
 hh_df %<>% select(!!c(2, 8, 13:29, 34, 36)) %>%
   mutate_if(is.character, as.numeric)
@@ -73,20 +80,13 @@ I need a table with summary statistics for each of the questions, by state.
 I will calculate the mean, standard deviation, and number of responses for each survey estimate.
 
 ```{r}
-pop_hh <- bind_cols(
- #Number of observations
-   hh_df %>%
+pop_hh <- hh_df %>%
   select(-id_viv) %>%
   group_by(ent) %>%
-  summarise_all(funs(n())),
-  #Mean and var
-  hh_df %>%
-  select(-id_viv) %>%
-  group_by(ent) %>%
-  summarise_all(funs(mean, var), na.rm=T)) %>%
-    t() %>%
+  summarise_all(funs(mean = mean(.,na.rm=T), n = sum(!is.na(.)), var = var(., na.rm=T), se = sd(., na.rm=T)/sqrt(sum(!is.na(.))))) %>%
+  t() %>%
   as.data.frame()
-
+  
 colnames(pop_hh) <- c("Jalisco", "Puebla")
 
 setDT(pop_hh, keep.rownames = "variable")
@@ -99,22 +99,14 @@ pop_hh %<>% arrange(variable)
 
 Household-level summary statistics for households with a cell-phone.
 ```{r}
-hh_cell_only <- bind_cols(
- #Number of observations
-  hh_df %>%
+hh_cell_only <- hh_df %>%
   select(-id_viv) %>%
   filter(celular==1) %>%  
   group_by(ent) %>%
-  summarise_all(funs(n())),
-  #Mean and var
-  hh_df %>%
-  select(-id_viv) %>%
-  filter(celular==1) %>%
-  group_by(ent) %>%
-  summarise_all(funs(mean, var), na.rm=T)) %>%
-    t() %>%
+  summarise_all(funs(mean = mean(.,na.rm=T), n = sum(!is.na(.)), var = var(., na.rm=T), se = sd(., na.rm=T)/sqrt(sum(!is.na(.))))) %>%
+  t() %>%
   as.data.frame()
-
+  
 colnames(hh_cell_only) <- c("Jalisco", "Puebla")
 
 setDT(hh_cell_only, keep.rownames = "variable")
@@ -197,19 +189,8 @@ pp_df %<>%
     nivacad==4 | nivacad==8 ~ 1,
     TRUE ~ 0))
 
-#Civil status (estcon)
-#Recoding to factor
-hh_df %<>%
-  mutate_at(.vars = vars(estcon), funs(as.factor))
-
-#Making dummy variables for continous variables
-hh_df <- recipe(id_viv ~., data=hh_df) %>%
-  step_dummy(estcon, one_hot=TRUE) %>%
-  prep(training=hh_df) %>%
-  bake(new_data = hh_df)
-
 #Removing unnecessary variables
-pp_df %<>% select(-dhsersal1, -dhsersal2, -otrarel_c, -escolari, -nivacad, -estcont)
+pp_df %<>% select(-dhsersal1, -dhsersal2, -otrarel_c, -escolari, -nivacad, -estcon)
 ```
 
 ```{r}
@@ -221,19 +202,12 @@ summary(pp_df)
 Table with summary statistics for each of the questions, by state.
 
 ```{r}
-pop_ind <- bind_cols(
- #Number of observations
-  pp_df %>%
+pop_ind <- hh_df %>%
+  select(id_viv, ent, celular) %>% 
+  inner_join(pp_df, by = c("id_viv" , "ent")) %>%
   select(-id_viv) %>%
   group_by(ent) %>%
-  summarise_all(funs(n()))
-  ,
-  #Mean and var
-  pp_df %>%
-  select(-id_viv) %>%
-  group_by(ent) %>%
-  summarise_all(funs(mean, var), na.rm=T)
-  ) %>%
+  summarise_all(funs(mean = mean(.,na.rm=T), n = sum(!is.na(.)), var = var(., na.rm=T), se = sd(., na.rm=T)/sqrt(sum(!is.na(.))))) %>%
     t() %>%
   as.data.frame()
 
@@ -242,6 +216,8 @@ colnames(pop_ind) <- c("Jalisco", "Puebla")
 setDT(pop_ind, keep.rownames = "variable")
 
 pop_ind %<>% arrange(variable)
+#All obs join
+#anti_join(hh_df, pp_df, by="id_viv")
 ```
 
 ## Individual: Cell-phone statistics
@@ -249,28 +225,16 @@ pop_ind %<>% arrange(variable)
 I have to merge the individual and household datasets to see which individuals are in a household with a cellphone.
 
 ```{r}
-pp_cell_only <- 
- bind_cols(
-  #Number of obs
-  hh_df %>%
+pp_cell_only <- hh_df %>%
   select(id_viv, ent, celular) %>% 
   inner_join(pp_df, by = c("id_viv" , "ent")) %>%
   filter(celular==1) %>%
   select(-id_viv) %>%
   group_by(ent) %>%
-  summarise_all(funs(n()))
-  ,
-  #Mean and var
-  hh_df %>%
-  select(id_viv, ent, celular) %>% 
-  inner_join(pp_df, by = c("id_viv" , "ent")) %>%
-  filter(celular==1) %>%
-  select(-id_viv) %>%
-  group_by(ent) %>%
-  summarise_all(funs(mean, var), na.rm=T)
-) %>%
+  summarise_all(funs(mean = mean(.,na.rm=T), n = sum(!is.na(.)), var = var(., na.rm=T), se = sd(., na.rm=T)/sqrt(sum(!is.na(.))))) %>%
   t() %>%
   as.data.frame()
+
 colnames(pp_cell_only) <- c("Jalisco", "Puebla")
 
 setDT(pp_cell_only, keep.rownames = "variable")
@@ -280,16 +244,17 @@ pp_cell_only %<>% arrange(variable)
 #anti_join(hh_df, pp_df, by="id_viv")
 ```
 
-# Difference of means
+# Household: Difference of means
 
 I now calculate the difference in survey statistics between households with a cell-phone and the general population, by state.
 ```{r}
 #Joining means for population and cell-only
-diff_means <- bind_cols (
+hh_diff_means <- bind_cols (
   pop_hh,
   hh_cell_only
 ) %>%
   select(-variable1) %>%
+  filter(variable %ni% c("ent, ent1")) %>%
   #Renaming variables for clarity
   rename(jalisco_pop = Jalisco, puebla_pop= Puebla, jalisco_cell = Jalisco1, puebla_cell= Puebla1) %>%
   #Keep only means
@@ -303,14 +268,14 @@ I also calculate the standard error of the difference. The formula is:
 
 $SE_{cell - pop} = \sqrt{\frac{\sigma^2_{cell}}{n_{cell}} + \frac{\sigma^2_{pop}}{n_{pop}}} $
 
-The number of observations is the same for the population and subset data.
-
-n_pop =143090
-n_cell=91646
+Number of observations:
+n_pop_jalisco/puebla =143090
+n_jalisco_cell=91646
+n_puebla_cell=91631
 
 ```{r}
 #Standard error of difference
-diff_se <- bind_cols (
+hh_diff_se <- bind_cols (
   pop_hh,
   hh_cell_only
 ) %>%
@@ -319,9 +284,180 @@ diff_se <- bind_cols (
   rename(jalisco_pop = Jalisco, puebla_pop= Puebla, jalisco_cell = Jalisco1, puebla_cell= Puebla1) %>%
   #Keep only means
   filter(grepl("var", variable)) %>%
-  mutate(se_jalisco = sqrt((jalisco_cell/91646) + (jalisco_pop/143090)),
-        se_puebla = sqrt((puebla_cell/91646) + (puebla_pop/143090)))
+  mutate(diff_se_jalisco = sqrt((jalisco_cell/91646) + (jalisco_pop/143090)),
+        diff_se_puebla = sqrt((puebla_cell/91631) + (puebla_pop/143090)))
 
+```
+
+# Individual: Difference of means
+
+```{r}
+pp_diff_means <- bind_cols (
+  pop_ind,
+  pp_cell_only
+) %>%
+  select(-variable1) %>%
+  filter(variable %ni% c("ent", "ent1")) %>%
+  #Renaming variables for clarity
+  rename(jalisco_pop = Jalisco, puebla_pop= Puebla, jalisco_cell = Jalisco1, puebla_cell= Puebla1) %>%
+  #Keep only means
+  filter(grepl("mean", variable)) %>%
+  mutate(diff_jalisco = jalisco_cell- jalisco_pop,
+         diff_puebla = puebla_cell - puebla_pop)
+```
+
+n_jalisco_pop=561243
+n_puebla_pop=561309
+n_jalisco_cell=362540
+n_puebla_cell=363192
+```{r}
+#Standard error of difference
+pp_diff_se <- bind_cols (
+  pop_ind,
+  pp_cell_only
+) %>%
+  select(-variable1) %>%
+  filter(variable %ni% c("ent", "ent1")) %>%
+  #Renaming variables for clarity
+  rename(jalisco_pop = Jalisco, puebla_pop= Puebla, jalisco_cell = Jalisco1, puebla_cell= Puebla1) %>%
+  #Keep only means
+  filter(grepl("var", variable)) %>%
+  mutate(diff_se_jalisco = sqrt((jalisco_cell/362540) + (jalisco_pop/561243)),
+        diff_se_puebla = sqrt((puebla_cell/363192) + (puebla_pop/561309)))
+
+```
+
+## Household: Standard error of means
+
+```{r}
+#Standard error of means
+ means_se <- bind_cols (
+  pop_ind,
+  pp_cell_only,
+) %>%
+  select(-variable1) %>%
+  filter(variable %ni% c("ent", "ent1")) %>%
+  #Renaming variables for clarity
+  rename(se_jalisco_pop = Jalisco, se_puebla_pop= Puebla, se_jalisco_cell = Jalisco1, se_puebla_cell= Puebla1) %>%
+  #Keep only means
+  filter(grepl("_se", variable)) %>%
+  bind_rows(
+     bind_cols (
+  pop_hh,
+  hh_cell_only,
+) %>%
+  select(-variable1) %>%
+  filter(variable %ni% c("ent", "ent1")) %>%
+  #Renaming variables for clarity
+  rename(se_jalisco_pop = Jalisco, se_puebla_pop= Puebla, se_jalisco_cell = Jalisco1, se_puebla_cell= Puebla1) %>%
+  #Keep only means
+  filter(grepl("_se", variable))
+  ) %>% mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_se", "")))
+```
+
+
+# Final tables
+
+```{r}
+#Combining differences of means and se of differences
+table2 <- bind_rows(
+  
+  bind_cols(
+  pp_diff_means,
+  pp_diff_se
+) %>%
+  select(-variable1, -jalisco_pop1, -puebla_pop1, -jalisco_cell1, -puebla_cell1)
+
+,
+
+bind_cols(
+  hh_diff_means,
+  hh_diff_se
+) %>%
+  select(-variable1, -jalisco_pop1, -puebla_pop1, -jalisco_cell1, -puebla_cell1)
+
+)
+```
+
+
+```{r}
+#Renaming variables
+table2 %<>%
+  mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_mean", "")))
+```
+Rerranging variable order
+```{r}
+table2 %<>%
+  mutate(order = case_when(
+    #Demographics
+    variable=="sexo" ~ 1,
+    variable=="edad" ~ 2,
+    variable=="edad_jefe" ~ 3,
+    variable=="numpers" ~ 4,
+    variable=="numhij" ~ 5,
+    variable=="totcuart" ~ 6,
+    variable=="cuadorm" ~ 7,
+    variable=="hlengua" ~ 8,
+    #Education
+    variable=="alfabet" ~ 9,
+    variable=="asisten" ~ 10,
+    variable=="primary" ~ 11,
+    variable=="secondary" ~ 12,
+    variable=="highschool" ~ 13,
+    #Health Insurance
+    variable=="dhsersal_imss" ~ 14,
+    variable=="dhsersal_isste" ~ 15,
+    variable=="dhsersal_private" ~ 16,
+    variable=="dhsersal_noinsu" ~ 17,
+    #Asset Ownership
+    variable=="electri" ~ 18,
+    variable=="radio" ~ 19,
+    variable=="televi" ~ 20,
+    variable=="refri" ~ 21,
+    variable=="lavadora" ~ 22,
+    variable=="autoprop" ~ 23,
+    variable=="compu" ~ 24,
+    variable=="telefono" ~ 25,
+    variable=="sersan" ~ 26,
+    variable=="celular" ~ 27,
+    variable=="internet" ~ 28,
+    #Type of Home
+    variable=="tipohog_X1" ~ 29,
+    variable=="tipohog_X2" ~ 30,
+    variable=="tipohog_X3" ~ 31,
+    variable=="tipohog_X4" ~ 32,
+    variable=="tipohog_X5" ~ 33,
+    variable=="tipohog_X6" ~ 34,
+    #Type of Flooring
+    variable=="pisos_X1" ~ 35,
+    variable=="pisos_X2" ~ 36,
+    variable=="pisos_X3" ~ 37,
+    #Waste Disposal (conagu)
+    variable=="conagu_X5" ~ 38,
+    variable=="conagu_X6" ~ 39,
+    variable=="conagu_X6" ~ 40,
+    #Drainage
+    variable=="drenaje_X1" ~ 41,
+    variable=="drenaje_X2" ~ 42,
+    variable=="drenaje_X3" ~ 43,
+    variable=="drenaje_X4" ~ 44,
+    variable=="drenaje_X5" ~ 45,
+    TRUE ~ 0
+  )) %>% filter(!order==0) %>% arrange(order)
+```
+
+Adding standard error of means.
+```{r}
+table2 %<>%
+  left_join(means_se, by="variable")
+```
+
+```{r}
+#Table 1: Cell-phone ownership
+hh_df %>%
+  group_by(ent) %>%
+  summarise(cell_mean = mean(celular, na.rm=T) * 100,
+            cell_se = sqrt(mean(celular, na.rm=T) * (1-(mean(celular, na.rm=T)))/length(celular)) * 100)
 ```
 
 ## Testing normality of the data
@@ -329,13 +465,24 @@ diff_se <- bind_cols (
 t-tests require that the data be normally distributed. I will test this with the Shapiro-Wilk test.
 
 ```{r}
+#Variables to test
+vars <- names
+
+#Select 5000 obs at random
+hh_df %>%
+  sample_n(5000) %>%
+  
 shapiro.test(hh_df$cuadorm)
 ```
 
 # t-test for difference in means
-
-
-
 ```{r}
 
 ```
+
+
+To do:
+- normality of variables
+- t-test for difference of means
+- line graph of cellphone owernship (latinobarometer)
+-automate table with se at the bottom of means
