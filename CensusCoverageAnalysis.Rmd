@@ -237,89 +237,6 @@ pp_cell_only %<>% arrange(variable)
 #anti_join(hh_df, pp_df, by="id_viv")
 ```
 
-# Household: Difference of means
-
-I now calculate the difference in survey statistics between households with a cell-phone and the general population, by state.
-```{r}
-#Joining means for population and cell-only
-hh_diff_means <- bind_cols (
-  pop_hh,
-  hh_cell_only
-) %>%
-  select(-variable1) %>%
-  filter(variable %ni% c("ent, ent1")) %>%
-  #Renaming variables for clarity
-  rename(jalisco_pop = Jalisco, puebla_pop= Puebla, jalisco_cell = Jalisco1, puebla_cell= Puebla1) %>%
-  #Keep only means
-  filter(grepl("mean", variable)) %>%
-  mutate(diff_jalisco = jalisco_cell- jalisco_pop,
-         diff_puebla = puebla_cell - puebla_pop)
-  
-```
-
-I also calculate the standard error of the difference. The formula is:
-
-$SE_{cell - pop} = \sqrt{\frac{\sigma^2_{cell}}{n_{cell}} + \frac{\sigma^2_{pop}}{n_{pop}}} $
-
-Number of observations:
-n_pop_jalisco/puebla =143090
-n_jalisco_cell=91646
-n_puebla_cell=91631
-
-```{r}
-#Standard error of difference
-hh_diff_se <- bind_cols (
-  pop_hh,
-  hh_cell_only
-) %>%
-  select(-variable1) %>%
-  #Renaming variables for clarity
-  rename(jalisco_pop = Jalisco, puebla_pop= Puebla, jalisco_cell = Jalisco1, puebla_cell= Puebla1) %>%
-  #Keep only means
-  filter(grepl("var", variable)) %>%
-  mutate(diff_se_jalisco = sqrt((jalisco_cell/91646) + (jalisco_pop/143090)),
-        diff_se_puebla = sqrt((puebla_cell/91631) + (puebla_pop/143090)))
-
-```
-
-# Individual: Difference of means
-
-```{r}
-pp_diff_means <- bind_cols (
-  pop_ind,
-  pp_cell_only
-) %>%
-  select(-variable1) %>%
-  filter(variable %ni% c("ent", "ent1")) %>%
-  #Renaming variables for clarity
-  rename(jalisco_pop = Jalisco, puebla_pop= Puebla, jalisco_cell = Jalisco1, puebla_cell= Puebla1) %>%
-  #Keep only means
-  filter(grepl("mean", variable)) %>%
-  mutate(diff_jalisco = jalisco_cell- jalisco_pop,
-         diff_puebla = puebla_cell - puebla_pop)
-```
-
-n_jalisco_pop=561243
-n_puebla_pop=561309
-n_jalisco_cell=362540
-n_puebla_cell=363192
-```{r}
-#Standard error of difference
-pp_diff_se <- bind_cols (
-  pop_ind,
-  pp_cell_only
-) %>%
-  select(-variable1) %>%
-  filter(variable %ni% c("ent", "ent1")) %>%
-  #Renaming variables for clarity
-  rename(jalisco_pop = Jalisco, puebla_pop= Puebla, jalisco_cell = Jalisco1, puebla_cell= Puebla1) %>%
-  #Keep only means
-  filter(grepl("var", variable)) %>%
-  mutate(diff_se_jalisco = sqrt((jalisco_cell/362540) + (jalisco_pop/561243)),
-        diff_se_puebla = sqrt((puebla_cell/363192) + (puebla_pop/561309)))
-
-```
-
 ## Household and Individual: Standard error of means
 
 ```{r}
@@ -345,9 +262,215 @@ pp_diff_se <- bind_cols (
   rename(se_jalisco_pop = Jalisco, se_puebla_pop= Puebla, se_jalisco_cell = Jalisco1, se_puebla_cell= Puebla1) %>%
   #Keep only means
   filter(grepl("_se", variable))
-  ) %>% mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_se", "")))
+  ) %>% mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_se", ""))) %>%
+  arrange(variable)
 ```
 
+# Household: Difference in means/proportions
+
+I now calculate the difference in survey statistics between households with a cell-phone and the general population, by state.
+```{r}
+#Joining means for population and cell-only
+hh_diff_means <- bind_cols (
+  pop_hh,
+  hh_cell_only
+) %>%
+  select(-variable1) %>%
+  filter(variable %ni% c("ent, ent1")) %>%
+  #Renaming variables for clarity
+  rename(jalisco_pop = Jalisco, puebla_pop= Puebla, jalisco_cell = Jalisco1, puebla_cell= Puebla1) %>%
+  #Keep only means
+  filter(grepl("mean", variable)) %>%
+  mutate(diff_jalisco = jalisco_cell- jalisco_pop,
+         diff_puebla = puebla_cell - puebla_pop) %>%
+    mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_mean", ""))) %>%
+  arrange(variable)
+  
+```
+
+# Individual: Difference in means/proportions
+
+```{r}
+pp_diff_means <- bind_cols (
+  pop_ind,
+  pp_cell_only
+) %>%
+  select(-variable1) %>%
+  filter(variable %ni% c("ent", "ent1")) %>%
+  #Renaming variables for clarity
+  rename(jalisco_pop = Jalisco, puebla_pop= Puebla, jalisco_cell = Jalisco1, puebla_cell= Puebla1) %>%
+  #Keep only means
+  filter(grepl("mean", variable)) %>%
+  mutate(diff_jalisco = jalisco_cell- jalisco_pop,
+         diff_puebla = puebla_cell - puebla_pop) %>%
+    mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_mean", ""))) %>%
+  arrange(variable)
+```
+
+# Household: Calculating SE of difference in proportions
+
+There are different formulas for the difference in the SE of continous and non-continous variables.
+
+I calculate the SE of means and proportions separately.
+
+### Proportions
+
+When samples are large (n >50), the distribution of the difference in proportions (not continous outcomes) is approprimately normal.
+
+Source: https://www.ajodo.org/article/S0889-5406(16)30311-0/pdf
+
+I first calculate the pooled standard error for proportions:
+
+Common proportion (p) = $\frac{p_{cell} * n_{cell} + p_{pop} * n_{pop}}{n_{cell} + n_{pop}}$
+
+SE pooled =$\sqrt {p * (1-p) * (\frac{1}{n_{cell}} + \frac{1}{n_{pop}}) }$
+
+Number of obs. (household):
+n_pop_jalisco/puebla =143090
+n_jalisco_cell=91646
+n_puebla_cell=91631
+
+```{r}
+#Standard error of difference
+n_pop_jalisco =143090
+n_pop_puebla =143090
+n_cell_jalisco=91646
+n_cell_puebla=91631
+```
+
+SE and Z score for difference in proportions.
+```{r}
+hh_diff_se_prop <- hh_diff_means %>%
+  filter(variable %ni% c("edad", "numpers", "numhij", "totcuart", "cuadorm")) %>%
+  #Common prop jalisco
+  mutate(p_jalisco = (((jalisco_pop * n_pop_jalisco) + (jalisco_cell * n_cell_jalisco))/(n_pop_jalisco + n_cell_jalisco)),
+  #Common prop puebla       
+         p_puebla = (((puebla_pop * n_pop_puebla) + (puebla_cell * n_cell_puebla))/(n_pop_puebla + n_cell_puebla)),
+  #Pooled SE jalisco       
+         se_diff_jalisco =  sqrt((p_jalisco * (1-p_jalisco) * ((1/n_pop_jalisco) + (1/n_cell_jalisco)))),
+    #Pooled SE puebla  
+          se_diff_puebla =  sqrt((p_puebla * (1-p_puebla) * ((1/n_pop_puebla) + (1/n_cell_puebla)))),
+  #Z test Jalisco
+          z_diff_jalisco = (diff_jalisco/se_diff_jalisco),
+  z_diff_puebla = (diff_puebla/se_diff_puebla)
+  
+  ) %>%
+  select(variable, se_diff_jalisco, se_diff_puebla, z_diff_jalisco, z_diff_puebla) %>%
+  arrange(variable)
+
+```
+
+### Means
+
+References: http://geog.uoregon.edu/geogr/topics/ttest.pdf
+
+Formula for the SE of the difference between means:
+
+$SE_{cell - pop} = \sqrt{\frac{\sigma^2_{cell}}{n_{cell}} + \frac{\sigma^2_{pop}}{n_{pop}}}$
+
+Because the variances between the two groups is not equal, the formula for the 
+
+SE for difference in means. 
+```{r}
+hh_diff_se_mean <- bind_cols (
+  pop_hh,
+  hh_cell_only
+) %>%
+  select(-variable1) %>%
+  filter(variable %in% c("edad_var", "numpers_var", "numhij_var", "totcuart_var", "cuadorm_var")) %>%
+  #Renaming variables for clarity
+  rename(jalisco_pop = Jalisco, puebla_pop= Puebla, jalisco_cell = Jalisco1, puebla_cell= Puebla1) %>%
+  mutate(se_diff_jalisco = sqrt((jalisco_cell/n_cell_jalisco) + (jalisco_pop/n_pop_jalisco)),
+        se_diff_puebla = sqrt((puebla_cell/n_cell_puebla) + (puebla_pop/n_pop_puebla)),
+        z_diff_jalisco = NA,
+        z_diff_puebla = NA
+        ) %>%
+  select(variable, se_diff_jalisco, se_diff_puebla, z_diff_jalisco, z_diff_puebla) %>%
+      mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_var", ""))) %>%
+  arrange(variable)
+
+```
+
+Combining proportions and means.
+```{r}
+hh_diff_se <- rbind (
+  hh_diff_se_prop,
+  hh_diff_se_mean) %>%
+  arrange(variable)
+```
+
+# Individual: Calculating SE of difference in proportions
+
+### Proportions
+
+Number of obs. (individual):
+
+ind_jalisco_pop=561243
+ind_puebla_pop=561309
+ind_jalisco_cell=362540
+ind_puebla_cell=363192
+
+```{r}
+#Number of observations (individuals)
+ind_jalisco_pop=561243
+ind_puebla_pop=561309
+ind_jalisco_cell=362540
+ind_puebla_cell=363192
+```
+
+```{r}
+#Standard error of difference
+pp_diff_se_prop <- pp_diff_means %>%
+  filter(variable %ni% c("edad", "edad_jefe", "numhij")) %>%
+  #Common prop jalisco
+  mutate(p_jalisco = (((jalisco_pop * ind_jalisco_pop) + (jalisco_cell * ind_jalisco_cell))/(ind_jalisco_pop + ind_jalisco_cell)),
+  #Common prop puebla       
+         p_puebla = (((puebla_pop * ind_puebla_pop) + (puebla_cell * ind_puebla_cell))/(ind_puebla_pop + ind_puebla_cell)),
+  #Pooled SE jalisco       
+         se_diff_jalisco =  sqrt((p_jalisco * (1-p_jalisco) * ((1/ind_jalisco_pop) + (1/ind_jalisco_cell)))),
+    #Pooled SE puebla  
+          se_diff_puebla =  sqrt((p_puebla * (1-p_puebla) * ((1/ind_puebla_pop) + (1/ind_puebla_cell)))),
+  #Z test Jalisco
+          z_diff_jalisco = (diff_jalisco/se_diff_jalisco),
+  z_diff_puebla = (diff_puebla/se_diff_puebla)
+  
+  ) %>%
+  select(variable, se_diff_jalisco, se_diff_puebla, z_diff_jalisco, z_diff_puebla) %>%
+    mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_mean", ""))) %>%
+    mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_var", ""))) %>%
+  arrange(variable)
+```
+
+### Means
+
+SE for difference in means. 
+```{r}
+pp_diff_se_mean <- bind_cols (
+  pop_ind,
+  pp_cell_only
+) %>%
+  select(-variable1) %>%
+  filter(variable %in% c("edad_mean", "edad_jefe_mean", "numhij_mean")) %>%
+  #Renaming variables for clarity
+  rename(jalisco_pop = Jalisco, puebla_pop= Puebla, jalisco_cell = Jalisco1, puebla_cell= Puebla1) %>%
+  mutate(se_diff_jalisco = sqrt((jalisco_cell/n_cell_jalisco) + (jalisco_pop/n_pop_jalisco)),
+        se_diff_puebla = sqrt((puebla_cell/n_cell_puebla) + (puebla_pop/n_pop_puebla)),
+        z_diff_jalisco = NA,
+        z_diff_puebla = NA
+        ) %>%
+  select(variable, se_diff_jalisco, se_diff_puebla, z_diff_jalisco, z_diff_puebla) %>%
+      mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_mean", ""))) %>%
+  arrange(variable)
+```
+
+Combining proportions and means.
+```{r}
+pp_diff_se <- rbind (
+  pp_diff_se_prop,
+  pp_diff_se_mean 
+) %>%
+  arrange(variable)
+```
 
 # Final tables
 
@@ -359,7 +482,8 @@ table2 <- bind_rows(
   pp_diff_means,
   pp_diff_se
 ) %>%
-  select(-variable1, -jalisco_pop1, -puebla_pop1, -jalisco_cell1, -puebla_cell1)
+  select(-variable1) %>%
+  arrange(variable)
 
 ,
 
@@ -367,19 +491,36 @@ bind_cols(
   hh_diff_means,
   hh_diff_se
 ) %>%
-  select(-variable1, -jalisco_pop1, -puebla_pop1, -jalisco_cell1, -puebla_cell1)
+  select(-variable1) %>%
+  arrange(variable)
 
 )
 ```
 
-Rerranging variable order.
-I am also removing cell-phone ownership from the table.
+Calculating Z-score for means (previously coded as NA because mean information was not available).
 ```{r}
-#Renaming variables
-table2 %<>%
-  mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_mean", "")))
+#Mutating obs with missing Z scores
+table2_noNA <- table2 %>%
+  filter(is.na(z_diff_jalisco) | is.na(z_diff_puebla)) %>%
+  mutate(z_diff_jalisco = diff_jalisco/se_diff_jalisco,
+         z_diff_puebla = diff_puebla/se_diff_puebla)
+
+#Removing previous observations
+table2 <- rbind (
+  table2,
+  table2_noNA
+) %>%
+  na.omit(.)
 ```
 
+Adding standard error of means to table.
+```{r}
+table2 %<>%
+  left_join(means_se, by="variable")
+```
+
+Rerranging variable order.
+I am also removing cell-phone ownership from the table.
 ```{r}
 table2 %<>%
   mutate(order = case_when(
@@ -407,7 +548,7 @@ table2 %<>%
     variable=="electri" ~ 18,
     variable=="radio" ~ 19,
     variable=="televi" ~ 20,
-    variable=="refri" ~ 21,
+    variable=="refrig" ~ 21,
     variable=="lavadora" ~ 22,
     variable=="autoprop" ~ 23,
     variable=="compu" ~ 24,
@@ -429,7 +570,7 @@ table2 %<>%
     #Waste Disposal (conagu)
     variable=="conagu_X5" ~ 38,
     variable=="conagu_X6" ~ 39,
-    variable=="conagu_X6" ~ 40,
+    variable=="conagu_X7" ~ 40,
     #Drainage
     variable=="drenaje_X1" ~ 41,
     variable=="drenaje_X2" ~ 42,
@@ -440,28 +581,23 @@ table2 %<>%
   )) %>% filter(!order==0) %>% arrange(order)
 ```
 
-Adding standard error of means to table.
-```{r}
-table2 %<>%
-  left_join(means_se, by="variable")
-```
 Rearranging variables.
 ```{r}
 table2 %<>%
-  select(variable, jalisco_pop, se_jalisco_pop, puebla_pop, se_puebla_pop, jalisco_cell, se_jalisco_cell, puebla_cell, se_puebla_cell, diff_jalisco, diff_se_jalisco, diff_puebla, diff_se_puebla)
+  select(variable, jalisco_pop, se_jalisco_pop, puebla_pop, se_puebla_pop, jalisco_cell, se_jalisco_cell, puebla_cell, se_puebla_cell, diff_jalisco, se_diff_jalisco, se_diff_jalisco, diff_puebla, se_diff_puebla, z_diff_jalisco, z_diff_puebla)
 ```
-
 
 Multiplying proportions by 100. This is easier to do if variables are columns instead of rows. This also allows me to place standard errors directly below means.
 
 ```{r}
 test <- table2 %>%
+  select(-z_diff_jalisco, -z_diff_puebla) %>%
   t() %>%
   as_tibble()
 
 names(test) <- test[1,]
 
-test <- test[-c(1,14),]
+test <- test[-1,]
 
 test %<>%
   mutate_all(funs(as.numeric)) %>%
@@ -469,42 +605,49 @@ test %<>%
             .funs = funs(. * 100)) %>%
     mutate_at(vars(sexo),
             .funs = funs(. * 100)) %>%
-  mutate_all(round, 3)
+  mutate_all(round, 2)
 
-row.names(test) <- (c("jalisco_pop", "se_jalisco_pop", "puebla_pop", "se_puebla_pop", "jalisco_cell", "se_jalisco_cell", "puebla_cell", "se_puebla_cell", "diff_jalisco", "diff_se_jalisco", "diff_puebla", "diff_se_puebla"))
+row.names(test) <- (c("jalisco_pop", "se_jalisco_pop", "puebla_pop", "se_puebla_pop", "jalisco_cell", "se_jalisco_cell", "puebla_cell", "se_puebla_cell", "diff_jalisco", "se_diff_jalisco", "diff_puebla", "se_diff_puebla", "z_diff_jalisco", "z_diff_puebla"))
+
+test %<>%
+  t() %>% as_tibble()
 ```
 
-## Testing normality of the data
+Readding z-scores and stars for significance. Because all variables except for gender are significant, I will add stars to all variables and manually remove those that are not significant.
+```{r}
+test$z_diff_jalisco <- table2$z_diff_jalisco
+test$z_diff_puebla <- table2$z_diff_puebla
+test$stars <- as.character("***")
+```
 
-t-tests require that the data be normally distributed. I will test this with the Kolmogorov-Smirnov test. This is because the Shapiro-Wilk test requires fewer than 5,000 obs. and may be oversensitive to small deviations in normality.
+Writing se in parenthesis next to mean.
 
 ```{r}
-#KS test for each variable in household dataset
-normality_test <- list()
-
-for(i in seq(dim(hh_df)[2])) {
-  result <- append(result, ks.test((hh_df[[i]]), y='pnorm', alternative='two.sided'))
-}
-
-print(normality_test)
+test %<>%
+  mutate_at(vars(contains("se")), funs(paste("(",.,")", sep=""))) %>%
+  unite("Pop_Jalisco", 1:2 , sep=" ", remove=T) %>%
+  unite("Pop_Puebla", puebla_pop:se_puebla_pop, sep=" ", remove=T) %>%
+  unite("Cell_Jalisco", jalisco_cell: se_jalisco_cell, sep=" ", remove=T) %>%
+    unite("Cell_Puebla", puebla_cell: se_puebla_cell, sep=" ", remove=T) %>%
+    unite("Bias_Jalisco", diff_jalisco: se_diff_jalisco, sep=" ", remove=T) %>%
+      unite("Bias_Puebla", diff_puebla: se_diff_puebla, sep=" ", remove=T)
 ```
 
+Adding stars to unweighted bias.
 ```{r}
-#Normal Q-Q Plot for number of people in HH
-qqnorm(hh_df$numpers)
+test %<>%
+  unite("Bias_Jalisco", Bias_Jalisco, stars, remove=F) %>%
+    unite("Bias_Puebla", Bias_Puebla, stars)
 ```
-Results show that most variables are not normally distributed. Since t-tests assume that the variables are normally distributed, I will perform a non-parametric Wilcoxon rank sum test.
 
-# Wilcox test for difference in means
+Exporting table.
 ```{r}
-wilcox.test(hh_df$totcuart ~ hh_df$celular, df=hh_df)
+write.csv(test, "table2.csv")
 ```
-
 
 To do:
--populate table with se at the bottom of means
-- wilcox for difference of means
 -jalisco and puebla demographic comparison to national averages
+-re-write intro and data/methods
 -post-stratification weighting adjustments
 
 # Cell-Phone Ownership Statistics
