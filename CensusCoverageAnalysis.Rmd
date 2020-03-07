@@ -16,7 +16,9 @@ library(janitor)
 library(dplyr)
 library(recipes)
 library(stringr)
-#library(polotrix)
+library(ggplot2)
+library(readr)
+library(forcats)
 ```
 
 ### Reading datasets
@@ -77,7 +79,7 @@ ENT 21 is Puebla
 
 I need a table with summary statistics for each of the questions, by state.
 
-I will calculate the mean, standard deviation, and number of responses for each survey estimate.
+I will calculate the mean, standard error, and number of responses for each survey estimate.
 
 ```{r}
 pop_hh <- hh_df %>%
@@ -122,24 +124,15 @@ pp <- as.data.table(read_stata(file="DUMMY_PERSONAS.dta")) %>%
   janitor::clean_names()
 ```
 
--Number 10 and under (child)
--Number 11-25 (youth)
--Number 25-65 (adults)
--Number 66 and up (seniors)
--Someone in household receives each type of dhsersal1 or 2 (need to make factor)
--all the discaps
--hlengua
--asisten
--nivacad
--alfabet
--estcon
--numhij
--edad_jefe
 
+Selecting only variables of interest.
 ```{r}
 pp_df <- pp %>% select(!!c(2,11:13, 17:21, 28, 32:35, 38, 40, 46)) %>%
   mutate_if(is.character, as.numeric)
+```
 
+Recoding data and assigning missing values.
+```{r}
 #Recoding to 1 or 0
 pp_df %<>%
   mutate_at(.vars = vars(sexo, asisten, alfabet, hlengua), funs(recode(., `2`=0, `3`=0))) %>%
@@ -327,7 +320,7 @@ pp_diff_se <- bind_cols (
 
 ```
 
-## Household: Standard error of means
+## Household and Individual: Standard error of means
 
 ```{r}
 #Standard error of means
@@ -379,13 +372,14 @@ bind_cols(
 )
 ```
 
-
+Rerranging variable order.
+I am also removing cell-phone ownership from the table.
 ```{r}
 #Renaming variables
 table2 %<>%
   mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_mean", "")))
 ```
-Rerranging variable order
+
 ```{r}
 table2 %<>%
   mutate(order = case_when(
@@ -419,7 +413,7 @@ table2 %<>%
     variable=="compu" ~ 24,
     variable=="telefono" ~ 25,
     variable=="sersan" ~ 26,
-    variable=="celular" ~ 27,
+    #variable=="celular" ~ 27,
     variable=="internet" ~ 28,
     #Type of Home
     variable=="tipohog_X1" ~ 29,
@@ -446,43 +440,106 @@ table2 %<>%
   )) %>% filter(!order==0) %>% arrange(order)
 ```
 
-Adding standard error of means.
+Adding standard error of means to table.
 ```{r}
 table2 %<>%
   left_join(means_se, by="variable")
 ```
+Rearranging variables.
+```{r}
+table2 %<>%
+  select(variable, jalisco_pop, se_jalisco_pop, puebla_pop, se_puebla_pop, jalisco_cell, se_jalisco_cell, puebla_cell, se_puebla_cell, diff_jalisco, diff_se_jalisco, diff_puebla, diff_se_puebla)
+```
+
+
+Multiplying proportions by 100. This is easier to do if variables are columns instead of rows. This also allows me to place standard errors directly below means.
+
+```{r}
+test <- table2 %>%
+  t() %>%
+  as_tibble()
+
+names(test) <- test[1,]
+
+test <- test[-c(1,14),]
+
+test %<>%
+  mutate_all(funs(as.numeric)) %>%
+  mutate_at(vars(hlengua:drenaje_X5),
+            .funs = funs(. * 100)) %>%
+    mutate_at(vars(sexo),
+            .funs = funs(. * 100)) %>%
+  mutate_all(round, 3)
+
+row.names(test) <- (c("jalisco_pop", "se_jalisco_pop", "puebla_pop", "se_puebla_pop", "jalisco_cell", "se_jalisco_cell", "puebla_cell", "se_puebla_cell", "diff_jalisco", "diff_se_jalisco", "diff_puebla", "diff_se_puebla"))
+```
+
+## Testing normality of the data
+
+t-tests require that the data be normally distributed. I will test this with the Kolmogorov-Smirnov test. This is because the Shapiro-Wilk test requires fewer than 5,000 obs. and may be oversensitive to small deviations in normality.
+
+```{r}
+#KS test for each variable in household dataset
+normality_test <- list()
+
+for(i in seq(dim(hh_df)[2])) {
+  result <- append(result, ks.test((hh_df[[i]]), y='pnorm', alternative='two.sided'))
+}
+
+print(normality_test)
+```
+
+```{r}
+#Normal Q-Q Plot for number of people in HH
+qqnorm(hh_df$numpers)
+```
+Results show that most variables are not normally distributed. Since t-tests assume that the variables are normally distributed, I will perform a non-parametric Wilcoxon rank sum test.
+
+# Wilcox test for difference in means
+```{r}
+wilcox.test(hh_df$totcuart ~ hh_df$celular, df=hh_df)
+```
+
+
+To do:
+-populate table with se at the bottom of means
+- wilcox for difference of means
+-jalisco and puebla demographic comparison to national averages
+-post-stratification weighting adjustments
+
+# Cell-Phone Ownership Statistics
+
+Cellphone ownership in Puebla and Jalisco (source: 2010 Mexican Census)
 
 ```{r}
 #Table 1: Cell-phone ownership
 hh_df %>%
   group_by(ent) %>%
   summarise(cell_mean = mean(celular, na.rm=T) * 100,
-            cell_se = sqrt(mean(celular, na.rm=T) * (1-(mean(celular, na.rm=T)))/length(celular)) * 100)
+            cell_se = sqrt(mean(celular, na.rm=T) * (1-(mean(celular, na.rm=T)))/length(celular)) * 100) %>%
+  mutate_all(round, 2)
 ```
 
-## Testing normality of the data
-
-t-tests require that the data be normally distributed. I will test this with the Shapiro-Wilk test.
+Cell-phone ownership 2005-2018, overall and by age (source: Latinobarometro).
 
 ```{r}
-#Variables to test
-vars <- names
-
-#Select 5000 obs at random
-hh_df %>%
-  sample_n(5000) %>%
-  
-shapiro.test(hh_df$cuadorm)
+latino <- read_csv(file="Latinobarometro_CellPhone_byAge.csv") %>%
+    mutate(Age = fct_recode(Age,
+                          "61+" = "61"))
 ```
 
-# t-test for difference in means
+
 ```{r}
-
+latino %>%
+  ggplot(aes(x=Year, y=Yes, linetype=fct_relevel(Age, "Overall"), label=Yes)) +
+  geom_line() +
+  theme_light() +
+  labs(title="Figure 1: Household cell-phone ownership 2005-2018, by age group",
+       y="Owns cell-phone (%)",
+       caption="Source: Latinobarometro",
+       linetype="Age Group") +
+  scale_y_continuous(breaks=seq(0,100, by=10)) +
+  scale_x_continuous(breaks=seq(2006,2018, by=2)) +
+  geom_label(data=subset(latino, Age=="Overall" & Year %in% c(2005, 2010, 2018)))
 ```
 
-
-To do:
-- normality of variables
-- t-test for difference of means
-- line graph of cellphone owernship (latinobarometer)
--automate table with se at the bottom of means
