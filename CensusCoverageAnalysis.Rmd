@@ -686,3 +686,45 @@ latino %>%
   geom_label(data=subset(latino, Age=="Overall" & Year %in% c(2005, 2010, 2018)))
 ```
 
+# Jalisco and Puebla vs. National Statistics
+
+```{r message=FALSE, warning=FALSE}
+national <- read_csv("NationalStatistics.csv")
+```
+
+Calculating percentages for key statistics.
+```{r}
+#National codebook provides variable info
+names(national)
+```
+
+Calculating proportion of the population that owns assets.
+```{r}
+national %<>%
+  select(n=pobtot, electri=vph_c_elec, pipedwater=vph_aguadv, sersan=vph_excsa, noassets=vph_snbien, radio =vph_radio, telev =vph_tv, refrig=vph_refri, lavadora=vph_lavad, autoprop=vph_autom, compu=vph_pc, telefono=vph_telef, celular=vph_cel, internet=vph_inter, dhsersal_imss=pder_imss, dhsersal_noinsu=psinder) %>%
+  mutate_at(vars(2:16), funs((./n ))) %>%
+  #mutate_all(round,2) %>%
+  t() %>% as.data.frame()
+
+names(national) <- "pop_national"
+
+setDT(national, keep.rownames = "variable")
+```
+
+Comparing national proportions to Jalisco and Puebla.
+```{r}
+table2 %>%
+  select(variable, jalisco_pop, puebla_pop) %>%
+inner_join(national, by="variable") %>%
+  mutate(diff_jalisco = (jalisco_pop - pop_national),
+         diff_puebla = (puebla_pop - pop_national))
+```
+There are large differences between Jalisco & Puebla compared to national averages. Inferences about this study should be limited to these two states. Inference about similar states should be done with caution.
+
+# Weighting Adjustments
+
+Predictive margins.
+```{r}
+
+```
+
