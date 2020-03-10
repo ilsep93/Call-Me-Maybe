@@ -19,6 +19,9 @@ library(stringr)
 library(ggplot2)
 library(readr)
 library(forcats)
+library(weights)
+library(gmodels)
+library(margins)
 ```
 
 ### Reading datasets
@@ -723,8 +726,31 @@ There are large differences between Jalisco & Puebla compared to national averag
 
 # Weighting Adjustments
 
-Predictive margins.
+## Predictive Margins
+
+Joined dataset with hh and person variables.
+```{r}
+merged <- hh_df %>%
+  left_join(pp_df, by = c("id_viv" , "ent")) %>%
+  #Removing HHID because it will not be used as a covariate
+  select(-id_viv)
+```
+
+All variables (except that one that is being predicted) will be used as covariates in the regression.
+
 ```{r}
 
+```
+
+
+
+Dropping some variables to avoid multi-collinearity.
+```{r}
+hh_margins <- hh_df %>%
+  select(-ent, -id_viv, -conagu_X7, -disagu_X6, -drenaje_X5, -tipohog_X6, -pisos_X3)
+
+x <-  lm(celular ~ celular + , data=hh_margins)
+
+margins(x)
 ```
 
