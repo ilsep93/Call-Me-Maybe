@@ -22,15 +22,15 @@ library(forcats)
 library(weights)
 library(gmodels)
 library(margins)
+library(psych)
+library(tidyr)
 ```
 
 ### Reading datasets
 
 ```{r}
-#Population totals per state, for post-stratification adjustments
-#iter <- read.dbf(file="ITER_NALDBF10.dbf")
-hh <- as.data.table(read_stata(file="DUMMY_VIVIENDAS.dta")) %>%
-  janitor::clean_names()
+#hh <- as.data.table(read_stata(file="DUMMY_VIVIENDAS.dta")) %>%
+  #janitor::clean_names()
 ```
 I will use the ITER data to get population level estimates of cellphone and landline coverage. The microdata at the household level will be used to estimate coverage error.
 
@@ -49,7 +49,10 @@ hh_df <- hh %>% as.data.frame()
 
 hh_df %<>% select(!!c(2, 8, 13:29, 34, 36)) %>%
   mutate_if(is.character, as.numeric)
+```
 
+Recoding.
+```{r}
 #Recoding to 1 or 0
 hh_df %<>%
   mutate_at(.vars = vars(electri, sersan, radio, refrig, autoprop, telefono, internet), funs(recode(., `2`=0, `3`=0))) %>%
@@ -60,91 +63,93 @@ hh_df %<>%
   mutate_at(.vars = vars(telefono, celular, internet, tipohog, pisos, electri, disagu, conagu, drenaje, radio, televi, telefono, refrig, sersan, lavadora, compu), funs(na_if(., 9))) %>%
   mutate_at(.vars = vars(cuadorm, totcuart), funs(na_if(., 99)))
 
-#Recoding to factor
+#Renaming variables
 hh_df %<>%
-  mutate_at(.vars = vars(conagu, disagu, drenaje, tipohog, pisos), funs(as.factor))
+  rename(toilet = sersan)
+```
 
-#Making dummy variables for continous variables
+Creating new variables.
+```{r}
+#HH has non-soil floors
+hh_df %<>%
+  mutate(nonsoil = ifelse(pisos %in% c(2,3),1,0),
+         soil = ifelse(pisos==1, 1,0))
+
+#HH has piped water
+hh_df %<>%
+  mutate(pipedwater = ifelse(disagu %in% c(1,2), 1,0))
+
+#Number of rooms
+hh_df %<>%
+  mutate(`1room` = ifelse(totcuart==1, 1,0),
+         `2rooms` = ifelse(totcuart==2, 1, 0),
+         `3+rooms` = ifelse(totcuart >=3, 1,0)
+         )
+#Number of bedrooms
+hh_df %<>%
+  mutate(`1bedroom` = ifelse(cuadorm==1, 1,0),
+         `2bedrooms` = ifelse(cuadorm==2, 1, 0),
+         `3+bedrooms` = ifelse(cuadorm >=3, 1,0)
+         )
+
+#HH has drainage
+hh_df %<>%
+  mutate(drainage = ifelse(drenaje %in% c(1,2,3,4), 1,0)
+         )
+#Electricity, drainage to public network, and piped water
+hh_df %<>%
+  mutate(publicservices = ifelse(drainage==1 & electri==1 & pipedwater==1,1,0))
+
+#Average number of people per room
+hh_df %<>%
+  mutate(ppperroom = numpers/totcuart)
+```
+
+Creating wealth index with the asset variables
+```{r}
+#Principal component analysis
+prn <- principal(hh_df[, 11:19], rotate="varimax", nfactors=3, covar = F, scores=T)
+
+index <- prn$scores[,1]
+```
+
+Breaking down scores into quintiles (5 equal groups).
+```{r}
+nlab <- c(1,2,3,4,5)
+
+hh_df %<>%
+  mutate(wealth = as.factor(cut(index, breaks=5, labels=nlab)))
+
+#Dummy variables wealth
 hh_df <- recipe(id_viv ~., data=hh_df) %>%
-  step_dummy(conagu, one_hot=TRUE) %>%
-  step_dummy(disagu, one_hot=TRUE) %>%
-  step_dummy(drenaje, one_hot=TRUE) %>%
-  step_dummy(tipohog, one_hot=TRUE) %>%
-  step_dummy(pisos, one_hot=TRUE) %>%
+  step_dummy(wealth, one_hot=TRUE) %>%
   prep(training=hh_df) %>%
   bake(new_data = hh_df)
 ```
 
-# Population: Household Summary Statistics
-
-ENT 14 is Jalisco
-ENT 21 is Puebla
-
-I need a table with summary statistics for each of the questions, by state.
-
-I will calculate the mean, standard error, and number of responses for each survey estimate.
-
 ```{r}
-pop_hh <- hh_df %>%
-  select(-id_viv) %>%
-  group_by(ent) %>%
-  summarise_all(funs(mean = mean(.,na.rm=T), n = sum(!is.na(.)), var = var(., na.rm=T), se = sd(., na.rm=T)/sqrt(sum(!is.na(.))))) %>%
-  t() %>%
-  as.data.frame()
-  
-colnames(pop_hh) <- c("Jalisco", "Puebla")
-
-setDT(pop_hh, keep.rownames = "variable")
-
-pop_hh %<>% arrange(variable)
-  
-```
-
-## Household: Cell-only
-
-Household-level summary statistics for households with a cell-phone.
-```{r}
-hh_cell_only <- hh_df %>%
-  select(-id_viv) %>%
-  filter(celular==1) %>%  
-  group_by(ent) %>%
-  summarise_all(funs(mean = mean(.,na.rm=T), n = sum(!is.na(.)), var = var(., na.rm=T), se = sd(., na.rm=T)/sqrt(sum(!is.na(.))))) %>%
-  t() %>%
-  as.data.frame()
-  
-colnames(hh_cell_only) <- c("Jalisco", "Puebla")
-
-setDT(hh_cell_only, keep.rownames = "variable")
-
-hh_cell_only %<>% arrange(variable)
-  
+#summary(hh_df)
 ```
 
 # Data Cleaning: Individual-Level Data
 
 ```{r}
-pp <- as.data.table(read_stata(file="DUMMY_PERSONAS.dta")) %>%
-  janitor::clean_names()
+#pp <- as.data.table(read_stata(file="DUMMY_PERSONAS.dta")) %>%
+  #janitor::clean_names()
 ```
 
-
 Selecting only variables of interest.
-```{r}
-pp_df <- pp %>% select(!!c(2,11:13, 17:21, 28, 32:35, 38, 40, 46)) %>%
-  mutate_if(is.character, as.numeric)
+```{r message=FALSE, warning=FALSE}
+#pp_df <- pp %>% select(!!c(2,11:13, 17:21, 28, 32:35, 38, 40, 46)) %>%
+  #mutate_if(is.character, as.numeric)
 ```
 
 Recoding data and assigning missing values.
 ```{r}
 #Recoding to 1 or 0
 pp_df %<>%
-  mutate_at(.vars = vars(sexo, asisten, alfabet, hlengua), funs(recode(., `2`=0, `3`=0))) %>%
-  mutate_at(.vars = vars(), funs(recode(., `3`=1, `4`=0))) %>%
-  #Recoding all married statuses to be same
-  mutate_at(.vars = vars(estcon), funs(recode(., `6`=5, `7`=5))) %>%
-  #Discapacitado variables
-  mutate_at(.vars = vars(discap1), funs(recode(., `10`=1))) %>%
-    mutate_at(.vars = vars(discap2), funs(recode(., `11`=1)))
+  mutate_at(.vars = vars(asisten, alfabet, hlengua), funs(recode(., `2`=0, `3`=0))) %>%
+  mutate_at(.vars = vars(), funs(recode(., `3`=1, `4`=0)))
 
 #Recoding 9 and 99 to missing
 pp_df %<>%
@@ -152,28 +157,11 @@ pp_df %<>%
   mutate_at(.vars = vars(escolari, nivacad, numhij), funs(na_if(., 99))) %>%
   mutate_at(.vars = vars(edad, edad_jefe), funs(na_if(., 999))) %>%
   mutate_at(.vars = vars(numhij), funs(na_if(., 98)))
+```
 
-#Discap NA to 0
-pp_df %<>%
-  mutate_at(.vars = vars(discap1, discap2), funs(replace(., is.na(.),0)))
-
-#Recoding dhsersal, if one is 1 then both are 1
-pp_df %<>%
-  mutate(dhsersal_imss = case_when(
-    dhsersal1==1 | dhsersal2 == 1 ~ 1,
-    TRUE ~ 0),
-    dhsersal_isste = case_when(
-    dhsersal1==3 | dhsersal1 ==3 ~ 1,
-    dhsersal2==4 | dhsersal2==4 ~ 1,
-    TRUE ~ 0)) %>%
-    mutate(dhsersal_private = case_when(
-      dhsersal1==5 | dhsersal2==5 ~ 1,
-      TRUE ~ 0)) %>%
-    mutate(dhsersal_noinsu = case_when(
-      dhsersal1==8 | dhsersal2==8 ~ 1,
-      TRUE ~ 0))
-
-#Creating education variables
+Creating new variables.
+```{r}
+#Creating education variables (highest level completed)
 pp_df %<>%
   mutate(primary = case_when(
     nivacad==2 | nivacad==6 ~ 1,
@@ -185,98 +173,136 @@ pp_df %<>%
     nivacad==4 | nivacad==8 ~ 1,
     TRUE ~ 0))
 
+#Creating age variables
+#Categories: 0-17,18-29, 30-44, 45-64, 65plus
+pp_df %<>%
+  mutate(`0to17` = ifelse(edad<=17, 1,0),
+         `18to29`= ifelse(edad >=18 & edad<=29, 1,0),
+         `30to44` = ifelse(edad >=30 & edad<=44, 1,0),
+         `45to64` = ifelse(edad>=45 & edad<=64,1,0),
+         `65up` = ifelse(edad<=65,1,0)
+         )
+
+#Age of HH Head
+pp_df %<>%
+  mutate(`head_0to17` = ifelse(edad_jefe<=17, 1,0),
+         `head_18to29`= ifelse(edad_jefe >=18 & edad_jefe<=29, 1,0),
+         `head_30to44` = ifelse(edad_jefe >=30 & edad_jefe<=44, 1,0),
+         `head_45to64` = ifelse(edad_jefe>=45 & edad_jefe<=64,1,0),
+         `head_65up` = ifelse(edad_jefe<=65, 1,0)
+         )
+
+#Insurance status
+pp_df %<>%
+  mutate(ins_imss = case_when(
+    dhsersal1==1 | dhsersal2 == 1 ~ 1,
+    TRUE ~ 0),
+    ins_isste = case_when(
+    dhsersal1==3 | dhsersal1 ==3 ~ 1,
+    dhsersal2==4 | dhsersal2==4 ~ 1,
+    TRUE ~ 0)) %>%
+    mutate(ins_private = case_when(
+      dhsersal1==5 | dhsersal2==5 ~ 1,
+      TRUE ~ 0)) %>%
+    mutate(ins_noinsu = case_when(
+      dhsersal1==8 | dhsersal2==8 ~ 1,
+      TRUE ~ 0))
+```
+
+```{r}
+#summary(pp_df)
+```
+
+Merging household and individual datasets.
+```{r}
+merged <- hh_df %>%
+  left_join(pp_df, by=c("id_viv", "ent"))
+```
+
+```{r}
+#Calculating fertility rates, by state and cell status
+merged %<>%
+  group_by(ent, celular) %>%
+  mutate(women12to130 = ifelse(sexo==3 & between(edad,12,130), 1,0),
+         female = ifelse(sexo==3, 1,0),
+         male= ifelse(sexo==1, 1,0),
+         fertility = sum(numhij, na.rm=T)/sum(women12to130, na.rm=T))
+```
+
+```{r}
 #Removing unnecessary variables
-pp_df %<>% select(-dhsersal1, -dhsersal2, -otrarel_c, -escolari, -nivacad, -estcon)
+merged %<>% select(-dhsersal1, -dhsersal2, -otrarel_c, -escolari, -nivacad, -estcon, -edad, -edad_jefe, -sexo, -discap1, -discap2, -disagu, -totcuart, -cuadorm, -drenaje, -pisos, -tipohog, -conagu, -numhij, -numpers, -women12to130)
 ```
 
-```{r}
-summary(pp_df)
-```
+# Population Summary Statistics
 
-## Population: Individual Summary Statistics
+ENT 14 is Jalisco
+ENT 21 is Puebla
 
-Table with summary statistics for each of the questions, by state.
+I need a table with summary statistics for each of the questions, by state.
 
-```{r}
-pop_ind <- hh_df %>%
-  select(id_viv, ent, celular) %>% 
-  inner_join(pp_df, by = c("id_viv" , "ent")) %>%
-  select(-id_viv) %>%
-  group_by(ent) %>%
-  summarise_all(funs(mean = mean(.,na.rm=T), n = sum(!is.na(.)), var = var(., na.rm=T), se = sd(., na.rm=T)/sqrt(sum(!is.na(.))))) %>%
-    t() %>%
-  as.data.frame()
-
-colnames(pop_ind) <- c("Jalisco", "Puebla")
-
-setDT(pop_ind, keep.rownames = "variable")
-
-pop_ind %<>% arrange(variable)
-#All obs join
-#anti_join(hh_df, pp_df, by="id_viv")
-```
-
-## Individual: Cell-phone statistics
-
-I have to merge the individual and household datasets to see which individuals are in a household with a cellphone.
+I will calculate the mean, standard error, and number of responses for each survey estimate.
 
 ```{r}
-pp_cell_only <- hh_df %>%
-  select(id_viv, ent, celular) %>% 
-  inner_join(pp_df, by = c("id_viv" , "ent")) %>%
-  filter(celular==1) %>%
+population <- merged %>%
   select(-id_viv) %>%
   group_by(ent) %>%
   summarise_all(funs(mean = mean(.,na.rm=T), n = sum(!is.na(.)), var = var(., na.rm=T), se = sd(., na.rm=T)/sqrt(sum(!is.na(.))))) %>%
   t() %>%
   as.data.frame()
+  
+colnames(population) <- c("Jalisco", "Puebla")
 
-colnames(pp_cell_only) <- c("Jalisco", "Puebla")
+setDT(population, keep.rownames = "variable")
 
-setDT(pp_cell_only, keep.rownames = "variable")
-
-pp_cell_only %<>% arrange(variable)
-#All obs join
-#anti_join(hh_df, pp_df, by="id_viv")
+population %<>% arrange(variable)
 ```
 
-## Household and Individual: Standard error of means
+## Cell-Only Summary Statistics
+
+Household-level summary statistics for households with a cell-phone.
+```{r}
+cell_only <- merged %>%
+  select(-id_viv) %>%
+  filter(celular==1) %>%  
+  group_by(ent) %>%
+  summarise_all(funs(mean = mean(.,na.rm=T), n = sum(!is.na(.)), var = var(., na.rm=T), se = sd(., na.rm=T)/sqrt(sum(!is.na(.))))) %>%
+  t() %>%
+  as.data.frame()
+  
+colnames(cell_only) <- c("Jalisco", "Puebla")
+
+setDT(cell_only, keep.rownames = "variable")
+
+cell_only %<>% arrange(variable)
+```
+
+## Standard error of proportions
 
 ```{r}
-#Standard error of means
- means_se <- bind_cols (
-  pop_ind,
-  pp_cell_only,
+#Standard error of proportions
+prop_se <- bind_cols (
+  population,
+  cell_only,
 ) %>%
   select(-variable1) %>%
   filter(variable %ni% c("ent", "ent1")) %>%
   #Renaming variables for clarity
   rename(se_jalisco_pop = Jalisco, se_puebla_pop= Puebla, se_jalisco_cell = Jalisco1, se_puebla_cell= Puebla1) %>%
-  #Keep only means
+  #Keep only SE
   filter(grepl("_se", variable)) %>%
-  bind_rows(
-     bind_cols (
-  pop_hh,
-  hh_cell_only,
-) %>%
-  select(-variable1) %>%
-  filter(variable %ni% c("ent", "ent1")) %>%
-  #Renaming variables for clarity
-  rename(se_jalisco_pop = Jalisco, se_puebla_pop= Puebla, se_jalisco_cell = Jalisco1, se_puebla_cell= Puebla1) %>%
-  #Keep only means
-  filter(grepl("_se", variable))
-  ) %>% mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_se", ""))) %>%
+  mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_se", ""))) %>%
   arrange(variable)
 ```
 
-# Household: Difference in means/proportions
+# Difference in proportions
 
 I now calculate the difference in survey statistics between households with a cell-phone and the general population, by state.
 ```{r}
-#Joining means for population and cell-only
-hh_diff_means <- bind_cols (
-  pop_hh,
-  hh_cell_only
+#Joining proportions for population and cell-only
+diff_prop <- bind_cols (
+  population,
+  cell_only
 ) %>%
   select(-variable1) %>%
   filter(variable %ni% c("ent, ent1")) %>%
@@ -288,39 +314,15 @@ hh_diff_means <- bind_cols (
          diff_puebla = puebla_cell - puebla_pop) %>%
     mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_mean", ""))) %>%
   arrange(variable)
-  
 ```
 
-# Individual: Difference in means/proportions
-
-```{r}
-pp_diff_means <- bind_cols (
-  pop_ind,
-  pp_cell_only
-) %>%
-  select(-variable1) %>%
-  filter(variable %ni% c("ent", "ent1")) %>%
-  #Renaming variables for clarity
-  rename(jalisco_pop = Jalisco, puebla_pop= Puebla, jalisco_cell = Jalisco1, puebla_cell= Puebla1) %>%
-  #Keep only means
-  filter(grepl("mean", variable)) %>%
-  mutate(diff_jalisco = jalisco_cell- jalisco_pop,
-         diff_puebla = puebla_cell - puebla_pop) %>%
-    mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_mean", ""))) %>%
-  arrange(variable)
-```
-
-# Household: Calculating SE of difference in proportions
-
-There are different formulas for the difference in the SE of continous and non-continous variables.
-
-I calculate the SE of means and proportions separately.
-
-### Proportions
+# Calculating SE of difference in proportions
 
 When samples are large (n >50), the distribution of the difference in proportions (not continous outcomes) is approprimately normal.
 
 Source: https://www.ajodo.org/article/S0889-5406(16)30311-0/pdf
+
+Because the population and cell-only populations are not independent, I need to incorporate the covariance between teh two samples in the standard deviation formula.
 
 I first calculate the pooled standard error for proportions:
 
@@ -343,8 +345,8 @@ n_cell_puebla=91631
 
 SE and Z score for difference in proportions.
 ```{r}
-hh_diff_se_prop <- hh_diff_means %>%
-  filter(variable %ni% c("edad", "numpers", "numhij", "totcuart", "cuadorm")) %>%
+diff_se_prop <- diff_prop %>%
+  filter(variable %ni% c("fertility", "ppperroom")) %>%
   #Common prop jalisco
   mutate(p_jalisco = (((jalisco_pop * n_pop_jalisco) + (jalisco_cell * n_cell_jalisco))/(n_pop_jalisco + n_cell_jalisco)),
   #Common prop puebla       
@@ -363,7 +365,7 @@ hh_diff_se_prop <- hh_diff_means %>%
 
 ```
 
-### Means
+# Calculating SE of difference in means
 
 References: http://geog.uoregon.edu/geogr/topics/ttest.pdf
 
@@ -371,16 +373,14 @@ Formula for the SE of the difference between means:
 
 $SE_{cell - pop} = \sqrt{\frac{\sigma^2_{cell}}{n_{cell}} + \frac{\sigma^2_{pop}}{n_{pop}}}$
 
-Because the variances between the two groups is not equal, the formula for the 
-
 SE for difference in means. 
 ```{r}
-hh_diff_se_mean <- bind_cols (
-  pop_hh,
-  hh_cell_only
+diff_se_mean <- bind_cols (
+  population,
+  cell_only
 ) %>%
   select(-variable1) %>%
-  filter(variable %in% c("edad_var", "numpers_var", "numhij_var", "totcuart_var", "cuadorm_var")) %>%
+   filter(variable %in% c("fertility_var", "ppperroom_var")) %>%
   #Renaming variables for clarity
   rename(jalisco_pop = Jalisco, puebla_pop= Puebla, jalisco_cell = Jalisco1, puebla_cell= Puebla1) %>%
   mutate(se_diff_jalisco = sqrt((jalisco_cell/n_cell_jalisco) + (jalisco_pop/n_pop_jalisco)),
@@ -391,87 +391,13 @@ hh_diff_se_mean <- bind_cols (
   select(variable, se_diff_jalisco, se_diff_puebla, z_diff_jalisco, z_diff_puebla) %>%
       mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_var", ""))) %>%
   arrange(variable)
-
 ```
 
 Combining proportions and means.
 ```{r}
-hh_diff_se <- rbind (
-  hh_diff_se_prop,
-  hh_diff_se_mean) %>%
-  arrange(variable)
-```
-
-# Individual: Calculating SE of difference in proportions
-
-### Proportions
-
-Number of obs. (individual):
-
-ind_jalisco_pop=561243
-ind_puebla_pop=561309
-ind_jalisco_cell=362540
-ind_puebla_cell=363192
-
-```{r}
-#Number of observations (individuals)
-ind_jalisco_pop=561243
-ind_puebla_pop=561309
-ind_jalisco_cell=362540
-ind_puebla_cell=363192
-```
-
-```{r}
-#Standard error of difference
-pp_diff_se_prop <- pp_diff_means %>%
-  filter(variable %ni% c("edad", "edad_jefe", "numhij")) %>%
-  #Common prop jalisco
-  mutate(p_jalisco = (((jalisco_pop * ind_jalisco_pop) + (jalisco_cell * ind_jalisco_cell))/(ind_jalisco_pop + ind_jalisco_cell)),
-  #Common prop puebla       
-         p_puebla = (((puebla_pop * ind_puebla_pop) + (puebla_cell * ind_puebla_cell))/(ind_puebla_pop + ind_puebla_cell)),
-  #Pooled SE jalisco       
-         se_diff_jalisco =  sqrt((p_jalisco * (1-p_jalisco) * ((1/ind_jalisco_pop) + (1/ind_jalisco_cell)))),
-    #Pooled SE puebla  
-          se_diff_puebla =  sqrt((p_puebla * (1-p_puebla) * ((1/ind_puebla_pop) + (1/ind_puebla_cell)))),
-  #Z test Jalisco
-          z_diff_jalisco = (diff_jalisco/se_diff_jalisco),
-  z_diff_puebla = (diff_puebla/se_diff_puebla)
-  
-  ) %>%
-  select(variable, se_diff_jalisco, se_diff_puebla, z_diff_jalisco, z_diff_puebla) %>%
-    mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_mean", ""))) %>%
-    mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_var", ""))) %>%
-  arrange(variable)
-```
-
-### Means
-
-SE for difference in means. 
-```{r}
-pp_diff_se_mean <- bind_cols (
-  pop_ind,
-  pp_cell_only
-) %>%
-  select(-variable1) %>%
-  filter(variable %in% c("edad_mean", "edad_jefe_mean", "numhij_mean")) %>%
-  #Renaming variables for clarity
-  rename(jalisco_pop = Jalisco, puebla_pop= Puebla, jalisco_cell = Jalisco1, puebla_cell= Puebla1) %>%
-  mutate(se_diff_jalisco = sqrt((jalisco_cell/n_cell_jalisco) + (jalisco_pop/n_pop_jalisco)),
-        se_diff_puebla = sqrt((puebla_cell/n_cell_puebla) + (puebla_pop/n_pop_puebla)),
-        z_diff_jalisco = NA,
-        z_diff_puebla = NA
-        ) %>%
-  select(variable, se_diff_jalisco, se_diff_puebla, z_diff_jalisco, z_diff_puebla) %>%
-      mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_mean", ""))) %>%
-  arrange(variable)
-```
-
-Combining proportions and means.
-```{r}
-pp_diff_se <- rbind (
-  pp_diff_se_prop,
-  pp_diff_se_mean 
-) %>%
+diff_se <- rbind (
+  diff_se_prop,
+  diff_se_mean) %>%
   arrange(variable)
 ```
 
@@ -479,25 +405,13 @@ pp_diff_se <- rbind (
 
 ```{r}
 #Combining differences of means and se of differences
-table2 <- bind_rows(
-  
-  bind_cols(
-  pp_diff_means,
-  pp_diff_se
+table2 <- bind_cols(
+  diff_prop,
+  diff_se,
+  prop_se
 ) %>%
-  select(-variable1) %>%
+  select(-variable1, -variable2) %>%
   arrange(variable)
-
-,
-
-bind_cols(
-  hh_diff_means,
-  hh_diff_se
-) %>%
-  select(-variable1) %>%
-  arrange(variable)
-
-)
 ```
 
 Calculating Z-score for means (previously coded as NA because mean information was not available).
@@ -516,70 +430,73 @@ table2 <- rbind (
   na.omit(.)
 ```
 
-Adding standard error of means to table.
-```{r}
-table2 %<>%
-  left_join(means_se, by="variable")
-```
-
 Rerranging variable order.
 I am also removing cell-phone ownership from the table.
 ```{r}
 table2 %<>%
   mutate(order = case_when(
-    #Demographics
-    variable=="sexo" ~ 1,
-    variable=="edad" ~ 2,
-    variable=="edad_jefe" ~ 3,
-    variable=="numpers" ~ 4,
-    variable=="numhij" ~ 5,
-    variable=="totcuart" ~ 6,
-    variable=="cuadorm" ~ 7,
-    variable=="hlengua" ~ 8,
+    #Sex
+    variable=="male" ~ 1,
+    variable=="female" ~ 2,
+    variable=="fertility" ~ 3,
+    #Age
+    variable=="0to17" ~ 4,
+    variable=="18to29" ~ 5,
+    variable=="30to44" ~ 6,
+    variable=="45to64" ~ 7,
+    variable=="65up" ~ 8,
+    #Head age
+    variable=="head_0to17" ~ 9,
+    variable=="head_18to29" ~ 10,
+    variable=="head_30to44" ~ 11,
+    variable=="head_45to64" ~ 12,
+    variable=="head_65up" ~ 13,
+    #Number of rooms
+    variable=="1room" ~ 14,
+    variable=="2rooms" ~ 15,
+    variable=="3+rooms" ~ 16,
+    variable=="ppperroom" ~ 17,
+    #Number of bedrooms
+    variable=="1bedroom" ~ 18,
+    variable=="2bedrooms" ~ 19,
+    variable=="3+bedrooms" ~ 20,
     #Education
-    variable=="alfabet" ~ 9,
-    variable=="asisten" ~ 10,
-    variable=="primary" ~ 11,
-    variable=="secondary" ~ 12,
-    variable=="highschool" ~ 13,
+    variable=="alfabet" ~ 21,
+    variable=="asisten" ~ 22,
+    variable=="primary" ~ 23,
+    variable=="secondary" ~ 24,
+    variable=="highschool" ~ 25,
     #Health Insurance
-    variable=="dhsersal_imss" ~ 14,
-    variable=="dhsersal_isste" ~ 15,
-    variable=="dhsersal_private" ~ 16,
-    variable=="dhsersal_noinsu" ~ 17,
+    variable=="ins_imss" ~ 26,
+    variable=="ins_isste" ~ 27,
+    variable=="ins_private" ~ 28,
+    variable=="ins_noinsu" ~ 29,
     #Asset Ownership
-    variable=="electri" ~ 18,
-    variable=="radio" ~ 19,
-    variable=="televi" ~ 20,
-    variable=="refrig" ~ 21,
-    variable=="lavadora" ~ 22,
-    variable=="autoprop" ~ 23,
-    variable=="compu" ~ 24,
-    variable=="telefono" ~ 25,
-    variable=="sersan" ~ 26,
-    #variable=="celular" ~ 27,
-    variable=="internet" ~ 28,
-    #Type of Home
-    variable=="tipohog_X1" ~ 29,
-    variable=="tipohog_X2" ~ 30,
-    variable=="tipohog_X3" ~ 31,
-    variable=="tipohog_X4" ~ 32,
-    variable=="tipohog_X5" ~ 33,
-    variable=="tipohog_X6" ~ 34,
-    #Type of Flooring
-    variable=="pisos_X1" ~ 35,
-    variable=="pisos_X2" ~ 36,
-    variable=="pisos_X3" ~ 37,
-    #Waste Disposal (conagu)
-    variable=="conagu_X5" ~ 38,
-    variable=="conagu_X6" ~ 39,
-    variable=="conagu_X7" ~ 40,
-    #Drainage
-    variable=="drenaje_X1" ~ 41,
-    variable=="drenaje_X2" ~ 42,
-    variable=="drenaje_X3" ~ 43,
-    variable=="drenaje_X4" ~ 44,
-    variable=="drenaje_X5" ~ 45,
+    variable=="radio" ~ 30,
+    variable=="televi" ~ 31,
+    variable=="refrig" ~ 32,
+    variable=="lavadora" ~ 33,
+    variable=="autoprop" ~ 34,
+    variable=="compu" ~ 35,
+    variable=="telefono" ~ 36,
+    variable=="toilet" ~ 37,
+    variable=="internet" ~ 38,
+    #Wealth Index
+    variable=="wealth_X1" ~ 39,
+    variable=="wealth_X2" ~ 40,
+    variable=="wealth_X3" ~ 41,
+    variable=="wealth_X4" ~ 42,
+    variable=="wealth_X5" ~ 43,
+    #Type of flooring
+    variable=="soil" ~ 44,
+    variable=="nonsoil" ~ 45,
+    #Public Services
+    variable=="electri" ~ 46,
+    variable=="drainage" ~ 47,
+    variable=="pipedwater" ~ 48,
+    variable=="publicservices" ~ 49,
+    #Indigenous status
+    variable=="hlengua" ~ 50,
     TRUE ~ 0
   )) %>% filter(!order==0) %>% arrange(order)
 ```
@@ -604,23 +521,49 @@ test <- test[-1,]
 
 test %<>%
   mutate_all(funs(as.numeric)) %>%
-  mutate_at(vars(hlengua:drenaje_X5),
+  mutate_at(vars(male:female),
             .funs = funs(. * 100)) %>%
-    mutate_at(vars(sexo),
+    mutate_at(vars(`0to17`:ppperroom),
+            .funs = funs(. * 100)) %>%
+    mutate_at(vars(`1bedroom`:hlengua),
             .funs = funs(. * 100)) %>%
   mutate_all(round, 2)
 
-row.names(test) <- (c("jalisco_pop", "se_jalisco_pop", "puebla_pop", "se_puebla_pop", "jalisco_cell", "se_jalisco_cell", "puebla_cell", "se_puebla_cell", "diff_jalisco", "se_diff_jalisco", "diff_puebla", "se_diff_puebla", "z_diff_jalisco", "z_diff_puebla"))
+row.names(test) <- (c("jalisco_pop", "se_jalisco_pop", "puebla_pop", "se_puebla_pop", "jalisco_cell", "se_jalisco_cell", "puebla_cell", "se_puebla_cell", "diff_jalisco", "se_diff_jalisco", "diff_puebla", "se_diff_puebla"))
 
 test %<>%
   t() %>% as_tibble()
 ```
 
-Readding z-scores and stars for significance. Because all variables except for gender are significant, I will add stars to all variables and manually remove those that are not significant.
+Readding z-scores.
 ```{r}
+#Z scores
 test$z_diff_jalisco <- table2$z_diff_jalisco
 test$z_diff_puebla <- table2$z_diff_puebla
-test$stars <- as.character("***")
+```
+
+Taking absolute value of z-scores.
+```{r}
+test %<>%
+  mutate_at(vars(z_diff_jalisco, z_diff_puebla), funs(abs))
+```
+
+Creating significance stars.
+z > 1.28 = *
+z > 1.96= **
+z > 2.33 = ***
+```{r}
+test %<>%
+  mutate(stars_jalisco = case_when(
+    between(z_diff_jalisco, 1.28, 1.95)  ~ "*",
+    between(z_diff_jalisco, 1.96, 2.32) ~ "**",
+    z_diff_jalisco > 2.33 ~ "***",
+    TRUE ~ ""),
+    stars_puebla = case_when(
+    between(z_diff_puebla, 1.28, 1.95)  ~ "*",
+    between(z_diff_puebla, 1.96, 2.32) ~ "**",
+    z_diff_puebla > 2.33 ~ "***",
+    TRUE ~ ""))
 ```
 
 Writing se in parenthesis next to mean.
@@ -639,9 +582,24 @@ test %<>%
 Adding stars to unweighted bias.
 ```{r}
 test %<>%
-  unite("Bias_Jalisco", Bias_Jalisco, stars, remove=F) %>%
-    unite("Bias_Puebla", Bias_Puebla, stars)
+  unite("Bias_Jalisco", Bias_Jalisco, stars_jalisco, sep=" ", remove=T) %>%
+    unite("Bias_Puebla", Bias_Puebla, stars_puebla, sep=" ")
 ```
+
+Re-adding variable column.
+```{r}
+#Variable
+test$variable <- table2$variable
+test %<>% select(variable, everything())
+```
+
+
+Removing columns that are no longer needed.
+```{r}
+test %<>%
+  select(-z_diff_jalisco, -z_diff_puebla)
+```
+
 
 Exporting table.
 ```{r}
@@ -649,9 +607,8 @@ write.csv(test, "table2.csv")
 ```
 
 To do:
--jalisco and puebla demographic comparison to national averages
 -re-write intro and data/methods
--post-stratification weighting adjustments
+-raking weighting adjustments
 
 # Cell-Phone Ownership Statistics
 
@@ -726,31 +683,34 @@ There are large differences between Jalisco & Puebla compared to national averag
 
 # Weighting Adjustments
 
-## Predictive Margins
+# Raking
 
-Joined dataset with hh and person variables.
+The following values will be used for ratio-raking adjustments.
+-Sex
+-Age
+-Wealth index
+-Indigenous status
+-Finishing primary school
+
+
+
+Definining marginal proportions for the population.
+
+-Sex
+-Age (18-29, 30-44, 45-64, 65plus)
+-Wealth index
+-Indigenous status
+-Finishing primary school
+
 ```{r}
-merged <- hh_df %>%
-  left_join(pp_df, by = c("id_viv" , "ent")) %>%
-  #Removing HHID because it will not be used as a covariate
-  select(-id_viv)
-```
+#Education
+population <- table2 %>%
+  select(education = variable, jalisco_pop, puebla_pop) %>%
+  filter(str_detect(c("primary","secondary"), education))
 
-All variables (except that one that is being predicted) will be used as covariates in the regression.
-
-```{r}
-
-```
-
-
-
-Dropping some variables to avoid multi-collinearity.
-```{r}
-hh_margins <- hh_df %>%
-  select(-ent, -id_viv, -conagu_X7, -disagu_X6, -drenaje_X5, -tipohog_X6, -pisos_X3)
-
-x <-  lm(celular ~ celular + , data=hh_margins)
-
-margins(x)
+#Age
+table2 %>%
+  select(education = variable, jalisco_pop, puebla_pop) %>%
+  filter(str_detect(c("primary","secondary"), education))
 ```
 
