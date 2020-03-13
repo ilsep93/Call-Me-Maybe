@@ -20,17 +20,17 @@ library(ggplot2)
 library(readr)
 library(forcats)
 library(weights)
-library(gmodels)
-library(margins)
 library(psych)
 library(tidyr)
+library(anesrake)
+library(bigvis)
 ```
 
 ### Reading datasets
 
 ```{r}
-#hh <- as.data.table(read_stata(file="DUMMY_VIVIENDAS.dta")) %>%
-  #janitor::clean_names()
+hh <- as.data.table(read_stata(file="DUMMY_VIVIENDAS.dta")) %>%
+  janitor::clean_names()
 ```
 I will use the ITER data to get population level estimates of cellphone and landline coverage. The microdata at the household level will be used to estimate coverage error.
 
@@ -81,15 +81,15 @@ hh_df %<>%
 
 #Number of rooms
 hh_df %<>%
-  mutate(`1room` = ifelse(totcuart==1, 1,0),
-         `2rooms` = ifelse(totcuart==2, 1, 0),
-         `3+rooms` = ifelse(totcuart >=3, 1,0)
+  mutate(oneroom = ifelse(totcuart==1, 1,0),
+         tworooms = ifelse(totcuart==2, 1, 0),
+         threerooms = ifelse(totcuart >=3, 1,0)
          )
 #Number of bedrooms
 hh_df %<>%
-  mutate(`1bedroom` = ifelse(cuadorm==1, 1,0),
-         `2bedrooms` = ifelse(cuadorm==2, 1, 0),
-         `3+bedrooms` = ifelse(cuadorm >=3, 1,0)
+  mutate(onebedroom = ifelse(cuadorm==1, 1,0),
+         twobedrooms = ifelse(cuadorm==2, 1, 0),
+         threebedrooms = ifelse(cuadorm >=3, 1,0)
          )
 
 #HH has drainage
@@ -122,7 +122,7 @@ hh_df %<>%
 
 #Dummy variables wealth
 hh_df <- recipe(id_viv ~., data=hh_df) %>%
-  step_dummy(wealth, one_hot=TRUE) %>%
+  step_dummy(wealth, one_hot=TRUE, preserve=T) %>%
   prep(training=hh_df) %>%
   bake(new_data = hh_df)
 ```
@@ -134,14 +134,14 @@ hh_df <- recipe(id_viv ~., data=hh_df) %>%
 # Data Cleaning: Individual-Level Data
 
 ```{r}
-#pp <- as.data.table(read_stata(file="DUMMY_PERSONAS.dta")) %>%
-  #janitor::clean_names()
+pp <- as.data.table(read_stata(file="DUMMY_PERSONAS.dta")) %>%
+  janitor::clean_names()
 ```
 
 Selecting only variables of interest.
 ```{r message=FALSE, warning=FALSE}
-#pp_df <- pp %>% select(!!c(2,11:13, 17:21, 28, 32:35, 38, 40, 46)) %>%
-  #mutate_if(is.character, as.numeric)
+pp_df <- pp %>% select(!!c(2,11:13, 17:21, 28, 32:35, 38, 40, 46)) %>%
+  mutate_if(is.character, as.numeric)
 ```
 
 Recoding data and assigning missing values.
@@ -176,20 +176,20 @@ pp_df %<>%
 #Creating age variables
 #Categories: 0-17,18-29, 30-44, 45-64, 65plus
 pp_df %<>%
-  mutate(`0to17` = ifelse(edad<=17, 1,0),
-         `18to29`= ifelse(edad >=18 & edad<=29, 1,0),
-         `30to44` = ifelse(edad >=30 & edad<=44, 1,0),
-         `45to64` = ifelse(edad>=45 & edad<=64,1,0),
-         `65up` = ifelse(edad<=65,1,0)
+  mutate(zeroto17 = ifelse(edad<=17, 1,0),
+         eighteento29= ifelse(edad >=18 & edad<=29, 1,0),
+         thirtyto44 = ifelse(edad >=30 & edad<=44, 1,0),
+         fortyfiveto64 = ifelse(edad>=45 & edad<=64,1,0),
+         sixtyfiveup = ifelse(edad>=65,1,0)
          )
 
 #Age of HH Head
 pp_df %<>%
-  mutate(`head_0to17` = ifelse(edad_jefe<=17, 1,0),
-         `head_18to29`= ifelse(edad_jefe >=18 & edad_jefe<=29, 1,0),
-         `head_30to44` = ifelse(edad_jefe >=30 & edad_jefe<=44, 1,0),
-         `head_45to64` = ifelse(edad_jefe>=45 & edad_jefe<=64,1,0),
-         `head_65up` = ifelse(edad_jefe<=65, 1,0)
+  mutate(head_0to17 = ifelse(edad_jefe<=17, 1,0),
+         head_18to29= ifelse(edad_jefe >=18 & edad_jefe<=29, 1,0),
+         head_30to44 = ifelse(edad_jefe >=30 & edad_jefe<=44, 1,0),
+         head_45to64 = ifelse(edad_jefe>=45 & edad_jefe<=64,1,0),
+         head_65up = ifelse(edad_jefe>=65, 1,0)
          )
 
 #Insurance status
@@ -213,6 +213,8 @@ pp_df %<>%
 #summary(pp_df)
 ```
 
+# Merging HH and individual datasets
+
 Merging household and individual datasets.
 ```{r}
 merged <- hh_df %>%
@@ -228,6 +230,7 @@ merged %<>%
          male= ifelse(sexo==1, 1,0),
          fertility = sum(numhij, na.rm=T)/sum(women12to130, na.rm=T))
 ```
+
 
 ```{r}
 #Removing unnecessary variables
@@ -245,9 +248,9 @@ I will calculate the mean, standard error, and number of responses for each surv
 
 ```{r}
 population <- merged %>%
-  select(-id_viv) %>%
+  select(-id_viv, -agecat, -educat, -wealth) %>%
   group_by(ent) %>%
-  summarise_all(funs(mean = mean(.,na.rm=T), n = sum(!is.na(.)), var = var(., na.rm=T), se = sd(., na.rm=T)/sqrt(sum(!is.na(.))))) %>%
+  summarise_all(funs(mean = mean(.,na.rm=T), var = var(., na.rm=T), se = sd(., na.rm=T)/sqrt(sum(!is.na(.))))) %>%
   t() %>%
   as.data.frame()
   
@@ -277,7 +280,7 @@ setDT(cell_only, keep.rownames = "variable")
 cell_only %<>% arrange(variable)
 ```
 
-## Standard error of proportions
+## Standard error of proportions/means
 
 ```{r}
 #Standard error of proportions
@@ -295,7 +298,7 @@ prop_se <- bind_cols (
   arrange(variable)
 ```
 
-# Difference in proportions
+# Unweighted: Difference in proportions
 
 I now calculate the difference in survey statistics between households with a cell-phone and the general population, by state.
 ```{r}
@@ -316,7 +319,7 @@ diff_prop <- bind_cols (
   arrange(variable)
 ```
 
-# Calculating SE of difference in proportions
+# Unweighted: Calculating SE of difference in proportions
 
 When samples are large (n >50), the distribution of the difference in proportions (not continous outcomes) is approprimately normal.
 
@@ -365,7 +368,7 @@ diff_se_prop <- diff_prop %>%
 
 ```
 
-# Calculating SE of difference in means
+# Unweighted: Calculating SE of difference between means
 
 References: http://geog.uoregon.edu/geogr/topics/ttest.pdf
 
@@ -401,7 +404,7 @@ diff_se <- rbind (
   arrange(variable)
 ```
 
-# Final tables
+# Table: Unweighted Bias
 
 ```{r}
 #Combining differences of means and se of differences
@@ -504,7 +507,7 @@ table2 %<>%
 Rearranging variables.
 ```{r}
 table2 %<>%
-  select(variable, jalisco_pop, se_jalisco_pop, puebla_pop, se_puebla_pop, jalisco_cell, se_jalisco_cell, puebla_cell, se_puebla_cell, diff_jalisco, se_diff_jalisco, se_diff_jalisco, diff_puebla, se_diff_puebla, z_diff_jalisco, z_diff_puebla)
+  select(variable, jalisco_pop, se_jalisco_pop, puebla_pop, se_puebla_pop, jalisco_cell, se_jalisco_cell, puebla_cell, se_puebla_cell, diff_jalisco, se_diff_jalisco, se_diff_jalisco, diff_puebla, se_diff_puebla, z_diff_jalisco, z_diff_puebla, order)
 ```
 
 Multiplying proportions by 100. This is easier to do if variables are columns instead of rows. This also allows me to place standard errors directly below means.
@@ -606,10 +609,6 @@ Exporting table.
 write.csv(test, "table2.csv")
 ```
 
-To do:
--re-write intro and data/methods
--raking weighting adjustments
-
 # Cell-Phone Ownership Statistics
 
 Cellphone ownership in Puebla and Jalisco (source: 2010 Mexican Census)
@@ -631,7 +630,7 @@ latino <- read_csv(file="Latinobarometro_CellPhone_byAge.csv") %>%
                           "61+" = "61"))
 ```
 
-
+Creating linegraph.
 ```{r}
 latino %>%
   ggplot(aes(x=Year, y=Yes, linetype=fct_relevel(Age, "Overall"), label=Yes)) +
@@ -683,34 +682,497 @@ There are large differences between Jalisco & Puebla compared to national averag
 
 # Weighting Adjustments
 
-# Raking
+# ANES Raking
 
-The following values will be used for ratio-raking adjustments.
--Sex
--Age
--Wealth index
--Indigenous status
--Finishing primary school
+References: https://sdaza.com/blog/2012/raking/
 
+https://stackoverflow.com/questions/60279900/missing-levels-when-weightig-raking-data-using-anesrake/60280915#60280915
 
+Creating subset of data only with households that own a cellphone.
 
-Definining marginal proportions for the population.
+ENT 14 is Jalisco
+ENT 21 is Puebla
 
--Sex
--Age (18-29, 30-44, 45-64, 65plus)
--Wealth index
--Indigenous status
--Finishing primary school
+## Preparing data for raking
+
+Merging household and individual datasets.
+```{r}
+merged <- hh_df %>%
+  left_join(pp_df, by=c("id_viv", "ent"))
+```
+
+* Raking variables as factors.
+* No missing observations.
+* Collapsing categories with fewer than 5% of cases.
+```{r}
+#Age categories for raking
+merged_rake <- merged %>%
+  mutate(agecat = case_when(
+  edad<=17 ~ 1,
+  edad >=18 & edad<=29 ~ 2,
+  edad >=30 & edad<=44 ~ 3,
+  edad>=45 & edad<=64 ~ 4,
+  edad>=65 ~ 5),
+#Education categories for raking
+educat = case_when(
+   nivacad==2 | nivacad==6 ~ 1,
+   nivacad==3 | nivacad==7 ~ 2,
+   nivacad==4 | nivacad==8 ~ 3,
+   nivacad %in% c(0, 1, 5,9,10,11,12) ~ 4),
+#Collapse wealth 4 and 5 (low rate for 5)
+  wealth = recode(wealth, `5` = "4")
+  ) %>%
+  #Removing missing observations
+  select(ent, celular, educat, agecat, wealth) %>%
+  na.omit() %>%
+  mutate_at(vars(agecat, educat, wealth), funs(as.factor))
+```
+
+## Jalisco
+
+Population totals for Jalisco.
+```{r}
+merged_jal <- merged %>%
+  filter(ent==14) %>%
+ mutate(agecat = case_when(
+  edad<=17 ~ 1,
+  edad >=18 & edad<=29 ~ 2,
+  edad >=30 & edad<=44 ~ 3,
+  edad>=45 & edad<=64 ~ 4,
+  edad>=65 ~ 5),
+#Education categories for raking
+educat = case_when(
+   nivacad==2 | nivacad==6 ~ 1,
+   nivacad==3 | nivacad==7 ~ 2,
+   nivacad==4 | nivacad==8 ~ 3,
+   nivacad %in% c(0, 1, 5,9,10,11,12) ~ 4),
+#Collapse wealth 4 and 5 (low rate for 5)
+  wealth = recode(wealth, `5` = "4")
+  )
+```
+
+Defining target population.
+```{r}
+list_weights <- list(
+                       educat = wpct(merged_jal$educat),
+                       agecat = wpct(merged_jal$agecat),
+                       wealth = wpct(merged_jal$wealth)
+                          )
+```
+
+Cell-phone households in Jalisco (no missing obs)
+```{r}
+cellonly_jal <- merged_rake %>%
+  ungroup () %>%
+  filter(celular==1 & ent==14) %>%
+  #No obs must be missing
+  select(agecat, educat, wealth)
+
+#Must be dataframe object
+cellonly_jal <- as.data.frame(cellonly_jal)
+
+#ID variable
+cellonly_jal$caseid <- 1:dim(cellonly_jal)[1]
+```
 
 ```{r}
-#Education
-population <- table2 %>%
-  select(education = variable, jalisco_pop, puebla_pop) %>%
-  filter(str_detect(c("primary","secondary"), education))
-
-#Age
-table2 %>%
-  select(education = variable, jalisco_pop, puebla_pop) %>%
-  filter(str_detect(c("primary","secondary"), education))
+anesrakefinder(list_weights, cellonly_jal)
 ```
+
+Converged after 22 iterations.
+```{r}
+raking <- anesrake(list_weights,
+         cellonly_jal,
+         caseid=  cellonly_jal$caseid,
+         verbose= FALSE, cap = 5, 
+         choosemethod = "total",
+         type = "pctlim", 
+         pctlim = .05 , 
+         nlim = 5)
+```
+
+General design effect: 1.06
+```{r}
+raking_summary <- summary(raking)
+```
+
+Targets are now correct!
+```{r}
+raking_summary$educat
+```
+
+
+## Puebla
+
+Population totals for Puebla.
+```{r}
+merged_pue <- merged %>%
+  filter(ent==21) %>%
+ mutate(agecat = case_when(
+  edad<=17 ~ 1,
+  edad >=18 & edad<=29 ~ 2,
+  edad >=30 & edad<=44 ~ 3,
+  edad>=45 & edad<=64 ~ 4,
+  edad>=65 ~ 5),
+#Education categories for raking
+educat = case_when(
+   nivacad==2 | nivacad==6 ~ 1,
+   nivacad==3 | nivacad==7 ~ 2,
+   nivacad==4 | nivacad==8 ~ 3,
+   nivacad %in% c(0, 1, 5,9,10,11,12) ~ 4),
+#Collapse wealth 4 and 5 (low rate for 5)
+  wealth = recode(wealth, `5` = "4")
+  )
+```
+
+For some reason target weights were not computing correctly for age categories.
+```{r}
+list_weights <- list(
+                       educat = wpct(merged_pue$educat),
+                       agecat = wpct(merged_pue$agecat),
+                       wealth = wpct(merged_pue$wealth)
+                          )
+```
+
+Cell-phone households in Puebla (no missing obs)
+```{r}
+cellonly_pue <- merged_rake %>%
+  ungroup () %>%
+  filter(celular==1 & ent==21) %>%
+  #No obs must be missing
+  select(agecat, educat, wealth)
+
+cellonly_pue %<>%
+  mutate(caseid = 1:dim(cellonly_pue)[1]) %>%
+  as.data.frame()
+```
+
+```{r}
+anesrakefinder(list_weights, cellonly_pue)
+```
+
+Converged after 20 iterations.
+```{r}
+raking2 <- anesrake(list_weights,
+         cellonly_pue,
+         caseid=  cellonly_pue$caseid,
+         verbose= FALSE, cap = 5, 
+         choosemethod = "total",
+         type = "pctlim", 
+         pctlim = .05 , 
+         nlim = 5)
+```
+
+General design effect: 1.06
+```{r}
+raking_summary2 <- summary(raking2)
+```
+
+Targets are now correct!
+```{r}
+raking_summary2$educat
+```
+
+## Adding weights back to survey data
+
+Adding weights back to survey data.
+```{r}
+#Jalisco
+merged_weights <- bind_rows(
+  hh_df %>%
+  left_join(pp_df, by=c("id_viv", "ent")) %>%
+  drop_na(edad, nivacad, wealth) %>%
+  filter(celular==1 & ent==14) %>%
+  mutate(weight = raking$weightvec)
+,
+#Puebla
+hh_df %>%
+  left_join(pp_df, by=c("id_viv", "ent")) %>%
+  drop_na(edad, nivacad, wealth) %>%
+  filter(celular==1 & ent==21) %>%
+  mutate(weight = raking2$weightvec)
+)
+
+```
+
+```{r}
+#Calculating fertility rates, by state and cell status
+merged_weights %<>%
+  group_by(ent, celular) %>%
+  mutate(women12to130 = ifelse(sexo==3 & between(edad,12,130), 1,0),
+         female = ifelse(sexo==3, 1,0),
+         male= ifelse(sexo==1, 1,0),
+         fertility = sum(numhij, na.rm=T)/sum(women12to130, na.rm=T))
+```
+
+Removing variables that will not be used for analysis.
+```{r}
+merged_weights %<>% select(-dhsersal1, -dhsersal2, -otrarel_c, -escolari, -nivacad, -estcon, -edad, -edad_jefe, -sexo, -discap1, -discap2, -disagu, -totcuart, -cuadorm, -drenaje, -pisos, -tipohog, -conagu, -numhij, -numpers, -women12to130, -wealth)
+```
+
+# Calculating adjusted bias
+
+Formula for variance of weighted data:
+
+Summary statistics for weighted data (mean, se).
+```{r}
+weighted_cellonly <- merged_weights %>%
+  group_by(ent) %>%
+  summarise_all(funs(mean = weighted.mean(., w=weight, na.rm=T), var = weighted.var(., w=weight, na.rm=T), se = weighted.sd(., w=weight, na.rm=T)/sqrt(sum(!is.na(.))))) %>%
+  t() %>%
+  as.data.frame()
+  
+colnames(weighted_cellonly) <- c("Jalisco", "Puebla")
+
+setDT(weighted_cellonly, keep.rownames = "variable")
+
+weighted_cellonly %<>% arrange(variable)
+```
+
+## Adjusted: Difference in proportions
+
+I now calculate the difference in survey statistics between households with a cell-phone and the general population, by state.
+```{r}
+#Joining proportions for population and adjusted cell
+adj_diff_prop <- population %>%
+  inner_join(weighted_cellonly, by="variable") %>%
+  #Renaming variables for clarity
+  rename(jalisco_pop = Jalisco.x, puebla_pop= Puebla.x, jalisco_adj = Jalisco.y, puebla_adj= Puebla.y) %>%
+  #Keep only means
+  filter(grepl("mean", variable)) %>%
+  mutate(adj_diff_jalisco = jalisco_adj- jalisco_pop,
+  adj_diff_puebla = puebla_adj - puebla_pop) %>%
+    mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_mean", ""))) %>%
+    filter(variable %ni% c("ent, ent1", "id_viv")) %>%
+  arrange(variable)
+```
+
+## Adjusted: SE of proportions/means
+
+```{r}
+#Standard error of proportions
+adj_prop_se <- weighted_cellonly %>%
+  #Keep only SE
+  filter(grepl("_se", variable)) %>%
+  mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_se", ""))) %>%
+  #Renaming variables for clarity
+  rename(adj_se_jalisco = Jalisco, adj_se_puebla = Puebla) %>%
+  filter(variable %ni% c("ent, ent1", "weight", "id_viv")) %>%
+  arrange(variable)
+```
+
+
+## Adjusted: Standard error of difference beween proportions
+
+```{r}
+#Standard error of difference
+n_pop_jalisco =143090
+n_pop_puebla =143090
+n_cell_jalisco=91646
+n_cell_puebla=91631
+```
+
+SE and Z score for difference in proportions.
+```{r}
+adj_diff_se_prop <- adj_diff_prop %>%
+  filter(variable %ni% c("fertility", "ppperroom", "ent", "ent1", "weight", "id_viv")) %>%
+  #Common prop jalisco
+  mutate(p_jalisco = (((jalisco_pop * n_pop_jalisco) + (jalisco_adj * n_cell_jalisco))/(n_pop_jalisco + n_cell_jalisco)),
+  #Common prop puebla       
+         p_puebla = (((puebla_pop * n_pop_puebla) + (puebla_adj * n_cell_puebla))/(n_pop_puebla + n_cell_puebla)),
+  #Pooled SE jalisco       
+         adj_se_diff_jalisco =  sqrt((p_jalisco * (1-p_jalisco) * ((1/n_pop_jalisco) + (1/n_cell_jalisco)))),
+    #Pooled SE puebla  
+          adj_se_diff_puebla =  sqrt((p_puebla * (1-p_puebla) * ((1/n_pop_puebla) + (1/n_cell_puebla)))),
+  #Z test Jalisco
+          adj_z_diff_jalisco = (adj_diff_jalisco/adj_se_diff_jalisco),
+  adj_z_diff_puebla = (adj_diff_puebla/adj_se_diff_puebla)
+  
+  ) %>%
+  select(variable, adj_se_diff_jalisco, adj_se_diff_puebla, adj_z_diff_jalisco, adj_z_diff_puebla) %>%
+  arrange(variable)
+```
+
+# Weighted: Calculating SE of difference between means
+
+Formula for the SE of the difference between means:
+
+$SE_{cell - pop} = \sqrt{\frac{\sigma^2_{cell}}{n_{cell}} + \frac{\sigma^2_{pop}}{n_{pop}}}$
+
+SE for difference in means. 
+```{r}
+adj_diff_se_mean <- population %>%
+  inner_join(weighted_cellonly, by="variable") %>%
+  filter(variable %ni% c("ent, ent1", "weight", "id_viv")) %>%
+  #Renaming variables for clarity
+  rename(jalisco_pop = Jalisco.x, puebla_pop= Puebla.x, jalisco_adj = Jalisco.y, puebla_adj= Puebla.y) %>%
+  filter(variable %in% c("fertility_var", "ppperroom_var")) %>%
+  mutate(adj_se_diff_jalisco = sqrt((jalisco_adj/n_cell_jalisco) + (jalisco_pop/n_pop_jalisco)),
+        adj_se_diff_puebla = sqrt((puebla_adj/n_cell_puebla) + (puebla_pop/n_pop_puebla)),
+        adj_z_diff_jalisco = NA,
+        adj_z_diff_puebla = NA
+        ) %>%
+  select(variable, adj_se_diff_jalisco, adj_se_diff_puebla, adj_z_diff_jalisco, adj_z_diff_puebla) %>%
+      mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_var", ""))) %>%
+  arrange(variable)
+```
+
+Combining proportions and means.
+```{r}
+adj_diff_se <- bind_rows(
+  adj_diff_se_prop,
+  adj_diff_se_mean) %>%
+  arrange(variable)
+```
+
+# Adjusted Bias
+
+```{r}
+table_adj <- bind_cols(
+  adj_diff_prop,
+  adj_diff_se,
+  adj_prop_se
+) %>%
+  select(-variable1, -variable2) %>%
+  arrange(variable)
+```
+
+Calculating Z-score for means (previously coded as NA because mean information was not available).
+```{r}
+#Mutating obs with missing Z scores
+tableadj_noNA <- table_adj %>%
+  filter(is.na(adj_z_diff_jalisco) | is.na(adj_z_diff_puebla)) %>%
+  mutate(adj_z_diff_jalisco = adj_diff_jalisco/adj_se_diff_jalisco,
+         adj_z_diff_puebla = adj_diff_puebla/adj_se_diff_puebla)
+
+#Removing previous observations
+table_adj <- rbind (
+  table_adj,
+  tableadj_noNA
+) %>%
+  na.omit(.)
+```
+
+Ordering table.
+```{r}
+table_adj <- table2 %>%
+  select(variable, order) %>%
+  right_join(table_adj, by="variable") %>%
+  arrange(order)
+```
+
+Rearranging variables.
+```{r}
+table_adj %<>%
+  select(variable, jalisco_adj, adj_se_jalisco, puebla_adj, adj_se_puebla, adj_diff_jalisco, adj_se_diff_jalisco,  adj_diff_puebla, adj_se_diff_puebla, adj_z_diff_jalisco, adj_z_diff_puebla)
+
+#Removing cell-phone
+table_adj %<>%
+  filter(!grepl("celular", variable))
+```
+
+Multiplying proportions by 100. This is easier to do if variables are columns instead of rows. This also allows me to place standard errors directly below means.
+
+```{r}
+test_adj <- table_adj %>%
+  select(-adj_z_diff_jalisco, -adj_z_diff_puebla) %>%
+  t() %>%
+  as_tibble()
+
+names(test_adj) <- test_adj[1,]
+
+test_adj <- test_adj[-1,]
+
+test_adj %<>%
+  mutate_all(funs(as.numeric)) %>%
+  mutate_at(vars(male:female),
+            .funs = funs(. * 100)) %>%
+    mutate_at(vars(`0to17`:ppperroom),
+            .funs = funs(. * 100)) %>%
+    mutate_at(vars(`1bedroom`:hlengua),
+            .funs = funs(. * 100)) %>%
+  mutate_all(round, 2)
+
+row.names(test_adj) <- (c("jalisco_adj", "adj_se_jalisco", "puebla_adj", "adj_se_puebla", "adj_diff_jalisco", "adj_se_diff_jalisco", "adj_diff_puebla", "adj_se_diff_puebla"))
+
+test_adj %<>%
+  t() %>% as_tibble()
+```
+
+Readding z-scores.
+```{r}
+#Z scores
+test_adj$adj_z_diff_jalisco <- table_adj$adj_z_diff_jalisco
+test_adj$adj_z_diff_puebla <- table_adj$adj_z_diff_puebla
+#variable
+test_adj$variable <- table_adj$variable
+
+test_adj %<>%
+  select(variable, everything())
+```
+
+Taking absolute value of z-scores.
+```{r}
+test_adj %<>%
+  mutate_at(vars(adj_z_diff_jalisco, adj_z_diff_puebla), funs(abs))
+```
+
+Creating significance stars.
+z > 1.28 = *
+z > 1.96= **
+z > 2.33 = ***
+```{r}
+test_adj %<>%
+  mutate(stars_jalisco = case_when(
+    between(adj_z_diff_jalisco, 1.28, 1.95)  ~ "*",
+    between(adj_z_diff_jalisco, 1.96, 2.32) ~ "**",
+    adj_z_diff_jalisco > 2.33 ~ "***",
+    TRUE ~ ""),
+    stars_puebla = case_when(
+    between(adj_z_diff_puebla, 1.28, 1.95)  ~ "*",
+    between(adj_z_diff_puebla, 1.96, 2.32) ~ "**",
+    adj_z_diff_puebla > 2.33 ~ "***",
+    TRUE ~ ""))
+```
+
+Writing se in parenthesis next to mean.
+
+```{r}
+test_adj %<>%
+  mutate_at(vars(contains("se")), funs(paste("(",.,")", sep=""))) %>%
+  unite("Adj_Jalisco", jalisco_adj: adj_se_jalisco, sep=" ", remove=T) %>%
+    unite("Adj_Puebla", puebla_adj: adj_se_puebla, sep=" ", remove=T) %>%
+    unite("Adj_Bias_Jalisco", adj_diff_jalisco: adj_se_diff_jalisco, sep=" ", remove=T) %>%
+      unite("Adj_Bias_Puebla", adj_diff_puebla: adj_se_diff_puebla, sep=" ", remove=T)
+```
+
+Adding stars to unweighted bias.
+```{r}
+test_adj %<>%
+  unite("Adj_Bias_Jalisco", Adj_Bias_Jalisco, stars_jalisco, sep=" ", remove=T) %>%
+    unite("Adj_Bias_Puebla", Adj_Bias_Puebla, stars_puebla, sep=" ", remove=T)
+```
+
+Removing columns that are no longer needed.
+```{r}
+test_adj %<>%
+  select(-adj_z_diff_jalisco, -adj_z_diff_puebla)
+```
+
+# Final Table
+```{r}
+finaltable <- bind_cols(
+  test,
+  test_adj
+) %>%
+  select(-variable1, )
+```
+
+Exporting table.
+```{r}
+write.csv(finaltable, "finaltable.csv")
+```
+
+To do:
+-Writing!
 
