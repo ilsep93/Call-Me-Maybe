@@ -118,7 +118,7 @@ Breaking down scores into quintiles (5 equal groups).
 nlab <- c(1,2,3,4,5)
 
 hh_df %<>%
-  mutate(wealth = as.factor(cut(index, breaks=5, labels=nlab)))
+  mutate(wealth = (cut(index, breaks=5, labels=nlab)))
 
 #Dummy variables wealth
 hh_df <- recipe(id_viv ~., data=hh_df) %>%
@@ -163,24 +163,33 @@ Creating new variables.
 ```{r}
 #Creating education variables (highest level completed)
 pp_df %<>%
-  mutate(primary = case_when(
+  mutate(
+    lessprimary = ifelse(nivacad==0 | nivacad==1, 1,0),
+    
+    primary = case_when(
     nivacad==2 | nivacad==6 ~ 1,
-    TRUE ~ 0)) %>%
-  mutate(secondary = case_when(
+    TRUE ~ 0),
+    
+  secondary = case_when(
     nivacad==3 | nivacad==7 ~ 1,
-    TRUE ~ 0)) %>%
-  mutate(highschool = case_when(
+    TRUE ~ 0),
+  
+  highschool = case_when(
     nivacad==4 | nivacad==8 ~ 1,
-    TRUE ~ 0))
+    TRUE ~ 0),
+  
+  morehighschool = case_when(
+  nivacad > 8 ~ 1,
+  TRUE ~ 0))
 
 #Creating age variables
 #Categories: 0-17,18-29, 30-44, 45-64, 65plus
 pp_df %<>%
-  mutate(zeroto17 = ifelse(edad<=17, 1,0),
-         eighteento29= ifelse(edad >=18 & edad<=29, 1,0),
-         thirtyto44 = ifelse(edad >=30 & edad<=44, 1,0),
-         fortyfiveto64 = ifelse(edad>=45 & edad<=64,1,0),
-         sixtyfiveup = ifelse(edad>=65,1,0)
+  mutate(`0to17` = ifelse(edad<=17, 1,0),
+         `18to29`= ifelse(edad >=18 & edad<=29, 1,0),
+         `30to44` = ifelse(edad >=30 & edad<=44, 1,0),
+         `45to64` = ifelse(edad>=45 & edad<=64,1,0),
+         `65up` = ifelse(edad>=65,1,0)
          )
 
 #Age of HH Head
@@ -248,7 +257,7 @@ I will calculate the mean, standard error, and number of responses for each surv
 
 ```{r}
 population <- merged %>%
-  select(-id_viv, -agecat, -educat, -wealth) %>%
+  select(-id_viv, -wealth) %>%
   group_by(ent) %>%
   summarise_all(funs(mean = mean(.,na.rm=T), var = var(., na.rm=T), se = sd(., na.rm=T)/sqrt(sum(!is.na(.))))) %>%
   t() %>%
@@ -266,10 +275,10 @@ population %<>% arrange(variable)
 Household-level summary statistics for households with a cell-phone.
 ```{r}
 cell_only <- merged %>%
-  select(-id_viv) %>%
+  select(-id_viv, -wealth) %>%
   filter(celular==1) %>%  
   group_by(ent) %>%
-  summarise_all(funs(mean = mean(.,na.rm=T), n = sum(!is.na(.)), var = var(., na.rm=T), se = sd(., na.rm=T)/sqrt(sum(!is.na(.))))) %>%
+  summarise_all(funs(mean = mean(.,na.rm=T), var = var(., na.rm=T), se = sd(., na.rm=T)/sqrt(sum(!is.na(.))))) %>%
   t() %>%
   as.data.frame()
   
@@ -284,18 +293,16 @@ cell_only %<>% arrange(variable)
 
 ```{r}
 #Standard error of proportions
-prop_se <- bind_cols (
-  population,
-  cell_only,
-) %>%
-  select(-variable1) %>%
+prop_se <- population %>%
+  left_join(cell_only, by="variable") %>%
   filter(variable %ni% c("ent", "ent1")) %>%
-  #Renaming variables for clarity
-  rename(se_jalisco_pop = Jalisco, se_puebla_pop= Puebla, se_jalisco_cell = Jalisco1, se_puebla_cell= Puebla1) %>%
   #Keep only SE
   filter(grepl("_se", variable)) %>%
   mutate_at(.vars=vars(variable),funs(str_replace_all(.,"_se", ""))) %>%
-  arrange(variable)
+  arrange(variable) %>%
+  #Renaming variables for clarity
+  rename(se_jalisco_pop = Jalisco.x, se_puebla_pop= Puebla.x, se_jalisco_cell = Jalisco.y, se_puebla_cell= Puebla.y) 
+
 ```
 
 # Unweighted: Difference in proportions
@@ -433,6 +440,8 @@ table2 <- rbind (
   na.omit(.)
 ```
 
+## Variable order
+
 Rerranging variable order.
 I am also removing cell-phone ownership from the table.
 ```{r}
@@ -440,7 +449,6 @@ table2 %<>%
   mutate(order = case_when(
     #Sex
     variable=="male" ~ 1,
-    variable=="female" ~ 2,
     variable=="fertility" ~ 3,
     #Age
     variable=="0to17" ~ 4,
@@ -455,22 +463,23 @@ table2 %<>%
     variable=="head_45to64" ~ 12,
     variable=="head_65up" ~ 13,
     #Number of rooms
-    variable=="1room" ~ 14,
-    variable=="2rooms" ~ 15,
-    variable=="3+rooms" ~ 16,
-    variable=="ppperroom" ~ 17,
+    variable=="oneroom" ~ 14,
+    variable=="tworooms" ~ 15,
+    variable=="threerooms" ~ 16,
     #Number of bedrooms
-    variable=="1bedroom" ~ 18,
-    variable=="2bedrooms" ~ 19,
-    variable=="3+bedrooms" ~ 20,
+    variable=="onebedroom" ~ 18,
+    variable=="twobedrooms" ~ 19,
+    variable=="threebedrooms" ~ 20,
     #Education
     variable=="alfabet" ~ 21,
     variable=="asisten" ~ 22,
+    variable== "lessprimary" ~ 23,
     variable=="primary" ~ 23,
     variable=="secondary" ~ 24,
     variable=="highschool" ~ 25,
+    variable=="morehighschool" ~ 26,
     #Health Insurance
-    variable=="ins_imss" ~ 26,
+    variable=="ins_imss" ~ 27,
     variable=="ins_isste" ~ 27,
     variable=="ins_private" ~ 28,
     variable=="ins_noinsu" ~ 29,
@@ -522,17 +531,17 @@ names(test) <- test[1,]
 
 test <- test[-1,]
 
+#Multiplying by 100
 test %<>%
   mutate_all(funs(as.numeric)) %>%
-  mutate_at(vars(male:female),
+  #Avoiding multipling fertility rate
+  mutate_at(vars(male),
             .funs = funs(. * 100)) %>%
-    mutate_at(vars(`0to17`:ppperroom),
-            .funs = funs(. * 100)) %>%
-    mutate_at(vars(`1bedroom`:hlengua),
+    mutate_at(vars(`0to17`:hlengua),
             .funs = funs(. * 100)) %>%
   mutate_all(round, 2)
 
-row.names(test) <- (c("jalisco_pop", "se_jalisco_pop", "puebla_pop", "se_puebla_pop", "jalisco_cell", "se_jalisco_cell", "puebla_cell", "se_puebla_cell", "diff_jalisco", "se_diff_jalisco", "diff_puebla", "se_diff_puebla"))
+row.names(test) <- (c("jalisco_pop", "se_jalisco_pop", "puebla_pop", "se_puebla_pop", "jalisco_cell", "se_jalisco_cell", "puebla_cell", "se_puebla_cell", "diff_jalisco", "se_diff_jalisco", "diff_puebla", "se_diff_puebla", "order"))
 
 test %<>%
   t() %>% as_tibble()
@@ -609,76 +618,6 @@ Exporting table.
 write.csv(test, "table2.csv")
 ```
 
-# Cell-Phone Ownership Statistics
-
-Cellphone ownership in Puebla and Jalisco (source: 2010 Mexican Census)
-
-```{r}
-#Table 1: Cell-phone ownership
-hh_df %>%
-  group_by(ent) %>%
-  summarise(cell_mean = mean(celular, na.rm=T) * 100,
-            cell_se = sqrt(mean(celular, na.rm=T) * (1-(mean(celular, na.rm=T)))/length(celular)) * 100) %>%
-  mutate_all(round, 2)
-```
-
-Cell-phone ownership 2005-2018, overall and by age (source: Latinobarometro).
-
-```{r}
-latino <- read_csv(file="Latinobarometro_CellPhone_byAge.csv") %>%
-    mutate(Age = fct_recode(Age,
-                          "61+" = "61"))
-```
-
-Creating linegraph.
-```{r}
-latino %>%
-  ggplot(aes(x=Year, y=Yes, linetype=fct_relevel(Age, "Overall"), label=Yes)) +
-  geom_line() +
-  theme_light() +
-  labs(title="Figure 1: Household cell-phone ownership 2005-2018, by age group",
-       y="Owns cell-phone (%)",
-       caption="Source: Latinobarometro",
-       linetype="Age Group") +
-  scale_y_continuous(breaks=seq(0,100, by=10)) +
-  scale_x_continuous(breaks=seq(2006,2018, by=2)) +
-  geom_label(data=subset(latino, Age=="Overall" & Year %in% c(2005, 2010, 2018)))
-```
-
-# Jalisco and Puebla vs. National Statistics
-
-```{r message=FALSE, warning=FALSE}
-national <- read_csv("NationalStatistics.csv")
-```
-
-Calculating percentages for key statistics.
-```{r}
-#National codebook provides variable info
-names(national)
-```
-
-Calculating proportion of the population that owns assets.
-```{r}
-national %<>%
-  select(n=pobtot, electri=vph_c_elec, pipedwater=vph_aguadv, sersan=vph_excsa, noassets=vph_snbien, radio =vph_radio, telev =vph_tv, refrig=vph_refri, lavadora=vph_lavad, autoprop=vph_autom, compu=vph_pc, telefono=vph_telef, celular=vph_cel, internet=vph_inter, dhsersal_imss=pder_imss, dhsersal_noinsu=psinder) %>%
-  mutate_at(vars(2:16), funs((./n ))) %>%
-  #mutate_all(round,2) %>%
-  t() %>% as.data.frame()
-
-names(national) <- "pop_national"
-
-setDT(national, keep.rownames = "variable")
-```
-
-Comparing national proportions to Jalisco and Puebla.
-```{r}
-table2 %>%
-  select(variable, jalisco_pop, puebla_pop) %>%
-inner_join(national, by="variable") %>%
-  mutate(diff_jalisco = (jalisco_pop - pop_national),
-         diff_puebla = (puebla_pop - pop_national))
-```
-There are large differences between Jalisco & Puebla compared to national averages. Inferences about this study should be limited to these two states. Inference about similar states should be done with caution.
 
 # Weighting Adjustments
 
@@ -701,38 +640,65 @@ merged <- hh_df %>%
   left_join(pp_df, by=c("id_viv", "ent"))
 ```
 
+```{r}
+#Removing unnecessary variables
+merged %<>% select(-dhsersal1, -dhsersal2, -otrarel_c, -escolari, -estcon, -sexo, -discap1, -discap2, -disagu, -totcuart, -cuadorm, -drenaje, -pisos, -tipohog, -conagu, -numhij, -numpers)
+```
+
+Creating person ID variable.
+```{r}
+merged %<>%
+  group_by(id_viv) %>%
+  mutate(count = row_number(),
+         person_id = paste(id_viv, count, sep="")) %>%
+  ungroup()
+```
+
+
 * Raking variables as factors.
 * No missing observations.
 * Collapsing categories with fewer than 5% of cases.
 ```{r}
 #Age categories for raking
 merged_rake <- merged %>%
-  mutate(agecat = case_when(
+  ungroup() %>%
+  select(id_viv, person_id, ent, celular, nivacad, edad, wealth, hlengua) %>%
+  #Removing missing observations
+  drop_na(id_viv, person_id, ent, celular, nivacad, edad, wealth, hlengua) %>%
+
+ dplyr::mutate(agecat = case_when(
   edad<=17 ~ 1,
   edad >=18 & edad<=29 ~ 2,
   edad >=30 & edad<=44 ~ 3,
   edad>=45 & edad<=64 ~ 4,
   edad>=65 ~ 5),
+
 #Education categories for raking
 educat = case_when(
-   nivacad==2 | nivacad==6 ~ 1,
-   nivacad==3 | nivacad==7 ~ 2,
-   nivacad==4 | nivacad==8 ~ 3,
-   nivacad %in% c(0, 1, 5,9,10,11,12) ~ 4),
+  nivacad < 1 ~ 1, 
+  nivacad==2 | nivacad==6 ~ 2,
+   nivacad==3 | nivacad==7 ~ 3,
+   nivacad==4 | nivacad==8 ~ 4,
+   nivacad > 8 ~ 5),
 #Collapse wealth 4 and 5 (low rate for 5)
-  wealth = recode(wealth, `5` = "4")
-  ) %>%
-  #Removing missing observations
-  select(ent, celular, educat, agecat, wealth) %>%
-  na.omit() %>%
-  mutate_at(vars(agecat, educat, wealth), funs(as.factor))
+  wealth = fct_recode(wealth, "4" = "5"),
+
+#Indigenous status recoding 1 or 2 (no zeros allowed)
+  hlengua = ifelse(hlengua==0, 2, 1))
 ```
+
+```{r}
+merged_rake %<>%
+  mutate_at(vars(agecat, educat, hlengua), funs(as.factor))
+```
+
 
 ## Jalisco
 
 Population totals for Jalisco.
 ```{r}
 merged_jal <- merged %>%
+  ungroup() %>%
   filter(ent==14) %>%
  mutate(agecat = case_when(
   edad<=17 ~ 1,
@@ -740,15 +706,20 @@ merged_jal <- merged %>%
   edad >=30 & edad<=44 ~ 3,
   edad>=45 & edad<=64 ~ 4,
   edad>=65 ~ 5),
+  
 #Education categories for raking
 educat = case_when(
-   nivacad==2 | nivacad==6 ~ 1,
-   nivacad==3 | nivacad==7 ~ 2,
-   nivacad==4 | nivacad==8 ~ 3,
-   nivacad %in% c(0, 1, 5,9,10,11,12) ~ 4),
+  nivacad < 1 ~ 1, 
+  nivacad==2 | nivacad==6 ~ 2,
+   nivacad==3 | nivacad==7 ~ 3,
+   nivacad==4 | nivacad==8 ~ 4,
+   nivacad > 8 ~ 5),
 #Collapse wealth 4 and 5 (low rate for 5)
-  wealth = recode(wealth, `5` = "4")
-  )
+  wealth = recode(wealth, `5` = "4"),
+
+
+#Indigenous status recoding 1 or 2 (no zeros allowed)
+    hlengua = ifelse(hlengua==0, 2, 1)) 
 ```
 
 Defining target population.
@@ -756,34 +727,35 @@ Defining target population.
 list_weights <- list(
                        educat = wpct(merged_jal$educat),
                        agecat = wpct(merged_jal$agecat),
-                       wealth = wpct(merged_jal$wealth)
+                       wealth = wpct(merged_jal$wealth),
+                       hlengua = wpct(merged_jal$hlengua)
                           )
 ```
 
-Cell-phone households in Jalisco (no missing obs)
+Cell-phone households in Jalisco (no missing obs) and raking variables recoded as factors.
 ```{r}
 cellonly_jal <- merged_rake %>%
-  ungroup () %>%
+  ungroup() %>%
   filter(celular==1 & ent==14) %>%
   #No obs must be missing
-  select(agecat, educat, wealth)
+  select(id_viv, person_id, agecat, educat, wealth, hlengua)
 
 #Must be dataframe object
 cellonly_jal <- as.data.frame(cellonly_jal)
 
 #ID variable
-cellonly_jal$caseid <- 1:dim(cellonly_jal)[1]
+#cellonly_jal$caseid <- 1:dim(cellonly_jal)[1]
 ```
 
 ```{r}
-anesrakefinder(list_weights, cellonly_jal)
+#anesrakefinder(list_weights, cellonly_jal)
 ```
 
-Converged after 22 iterations.
+Converged after 35 iterations.
 ```{r}
 raking <- anesrake(list_weights,
          cellonly_jal,
-         caseid=  cellonly_jal$caseid,
+         caseid=  cellonly_jal$person_id,
          verbose= FALSE, cap = 5, 
          choosemethod = "total",
          type = "pctlim", 
@@ -791,10 +763,16 @@ raking <- anesrake(list_weights,
          nlim = 5)
 ```
 
-General design effect: 1.06
+
 ```{r}
 raking_summary <- summary(raking)
 ```
+
+General design effect: 1.134
+```{r}
+raking_summary$general.design.effect
+```
+
 
 Targets are now correct!
 ```{r}
@@ -807,6 +785,7 @@ raking_summary$educat
 Population totals for Puebla.
 ```{r}
 merged_pue <- merged %>%
+  ungroup() %>%
   filter(ent==21) %>%
  mutate(agecat = case_when(
   edad<=17 ~ 1,
@@ -816,12 +795,16 @@ merged_pue <- merged %>%
   edad>=65 ~ 5),
 #Education categories for raking
 educat = case_when(
-   nivacad==2 | nivacad==6 ~ 1,
-   nivacad==3 | nivacad==7 ~ 2,
-   nivacad==4 | nivacad==8 ~ 3,
-   nivacad %in% c(0, 1, 5,9,10,11,12) ~ 4),
+  nivacad < 1 ~ 1, 
+  nivacad==2 | nivacad==6 ~ 2,
+   nivacad==3 | nivacad==7 ~ 3,
+   nivacad==4 | nivacad==8 ~ 4,
+   nivacad > 8 ~ 5),
 #Collapse wealth 4 and 5 (low rate for 5)
-  wealth = recode(wealth, `5` = "4")
+  wealth = recode(wealth, `5` = "4"),
+
+#Indigenous status recoding 1 or 2 (no zeros allowed)
+  hlengua = ifelse(hlengua==0, 2, 1)
   )
 ```
 
@@ -830,7 +813,8 @@ For some reason target weights were not computing correctly for age categories.
 list_weights <- list(
                        educat = wpct(merged_pue$educat),
                        agecat = wpct(merged_pue$agecat),
-                       wealth = wpct(merged_pue$wealth)
+                       wealth = wpct(merged_pue$wealth),
+                       hlengua = wpct(merged_pue$hlengua)
                           )
 ```
 
@@ -840,7 +824,7 @@ cellonly_pue <- merged_rake %>%
   ungroup () %>%
   filter(celular==1 & ent==21) %>%
   #No obs must be missing
-  select(agecat, educat, wealth)
+  select(agecat, educat, wealth, hlengua)
 
 cellonly_pue %<>%
   mutate(caseid = 1:dim(cellonly_pue)[1]) %>%
@@ -851,7 +835,7 @@ cellonly_pue %<>%
 anesrakefinder(list_weights, cellonly_pue)
 ```
 
-Converged after 20 iterations.
+Converged after 31 iterations.
 ```{r}
 raking2 <- anesrake(list_weights,
          cellonly_pue,
@@ -863,14 +847,19 @@ raking2 <- anesrake(list_weights,
          nlim = 5)
 ```
 
-General design effect: 1.06
+
 ```{r}
-raking_summary2 <- summary(raking2)
+#raking_summary2 <- summary(raking2)
+```
+
+General design effect: 1.134
+```{r}
+#raking_summary2$general.design.effect
 ```
 
 Targets are now correct!
 ```{r}
-raking_summary2$educat
+#raking_summary2$educat
 ```
 
 ## Adding weights back to survey data
@@ -881,14 +870,14 @@ Adding weights back to survey data.
 merged_weights <- bind_rows(
   hh_df %>%
   left_join(pp_df, by=c("id_viv", "ent")) %>%
-  drop_na(edad, nivacad, wealth) %>%
+  drop_na(edad, nivacad, wealth, hlengua) %>%
   filter(celular==1 & ent==14) %>%
   mutate(weight = raking$weightvec)
 ,
 #Puebla
 hh_df %>%
   left_join(pp_df, by=c("id_viv", "ent")) %>%
-  drop_na(edad, nivacad, wealth) %>%
+  drop_na(edad, nivacad, wealth, hlengua) %>%
   filter(celular==1 & ent==21) %>%
   mutate(weight = raking2$weightvec)
 )
@@ -965,7 +954,7 @@ adj_prop_se <- weighted_cellonly %>%
 ## Adjusted: Standard error of difference beween proportions
 
 ```{r}
-#Standard error of difference
+#Standard error of difference (based on conservative n based on households)
 n_pop_jalisco =143090
 n_pop_puebla =143090
 n_cell_jalisco=91646
@@ -1085,11 +1074,9 @@ test_adj <- test_adj[-1,]
 
 test_adj %<>%
   mutate_all(funs(as.numeric)) %>%
-  mutate_at(vars(male:female),
+  mutate_at(vars(male),
             .funs = funs(. * 100)) %>%
-    mutate_at(vars(`0to17`:ppperroom),
-            .funs = funs(. * 100)) %>%
-    mutate_at(vars(`1bedroom`:hlengua),
+    mutate_at(vars(`0to17`:hlengua),
             .funs = funs(. * 100)) %>%
   mutate_all(round, 2)
 
@@ -1161,11 +1148,9 @@ test_adj %<>%
 
 # Final Table
 ```{r}
-finaltable <- bind_cols(
-  test,
-  test_adj
-) %>%
-  select(-variable1, )
+finaltable <- test %>%
+  inner_join(test_adj, by="variable") %>%
+  select(-order)
 ```
 
 Exporting table.
@@ -1173,6 +1158,74 @@ Exporting table.
 write.csv(finaltable, "finaltable.csv")
 ```
 
-To do:
--Writing!
+# Cell-Phone Ownership Statistics
+
+Cellphone ownership in Puebla and Jalisco (source: 2010 Mexican Census)
+
+```{r}
+#Table 1: Cell-phone ownership
+hh_df %>%
+  group_by(ent) %>%
+  summarise(cell_mean = mean(celular, na.rm=T) * 100,
+            cell_se = sqrt(mean(celular, na.rm=T) * (1-(mean(celular, na.rm=T)))/length(celular)) * 100) %>%
+  mutate_all(round, 2)
+```
+
+Cell-phone ownership 2005-2018, overall and by age (source: Latinobarometro).
+
+```{r}
+latino <- read_csv(file="Latinobarometro_CellPhone_byAge.csv") %>%
+    mutate(Age = fct_recode(Age,
+                          "61+" = "61"))
+```
+
+Creating linegraph.
+```{r}
+latino %>%
+  ggplot(aes(x=Year, y=Yes, linetype=fct_relevel(Age, "Overall"), label=Yes)) +
+  geom_line() +
+  theme_light() +
+  labs(title="Figure 1: Household cell-phone ownership 2005-2018, by age group",
+       y="Owns cell-phone (%)",
+       caption="Source: Latinobarometro",
+       linetype="Age Group") +
+  scale_y_continuous(breaks=seq(0,100, by=10)) +
+  scale_x_continuous(breaks=seq(2006,2018, by=2)) +
+  geom_label(data=subset(latino, Age=="Overall" & Year %in% c(2005, 2010, 2018)))
+```
+
+# Jalisco and Puebla vs. National Statistics
+
+```{r message=FALSE, warning=FALSE}
+national <- read_csv("NationalStatistics.csv")
+```
+
+Calculating percentages for key statistics.
+```{r}
+#National codebook provides variable info
+names(national)
+```
+
+Calculating proportion of the population that owns assets.
+```{r}
+national %<>%
+  select(n=pobtot, electri=vph_c_elec, pipedwater=vph_aguadv, sersan=vph_excsa, noassets=vph_snbien, radio =vph_radio, telev =vph_tv, refrig=vph_refri, lavadora=vph_lavad, autoprop=vph_autom, compu=vph_pc, telefono=vph_telef, celular=vph_cel, internet=vph_inter, dhsersal_imss=pder_imss, dhsersal_noinsu=psinder) %>%
+  mutate_at(vars(2:16), funs((./n ))) %>%
+  #mutate_all(round,2) %>%
+  t() %>% as.data.frame()
+
+names(national) <- "pop_national"
+
+setDT(national, keep.rownames = "variable")
+```
+
+Comparing national proportions to Jalisco and Puebla.
+```{r}
+table2 %>%
+  select(variable, jalisco_pop, puebla_pop) %>%
+inner_join(national, by="variable") %>%
+  mutate(diff_jalisco = (jalisco_pop - pop_national),
+         diff_puebla = (puebla_pop - pop_national))
+```
+There are large differences between Jalisco & Puebla compared to national averages. Inferences about this study should be limited to these two states. Inference about similar states should be done with caution.
 
