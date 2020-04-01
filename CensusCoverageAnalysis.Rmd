@@ -161,27 +161,27 @@ pp_df %<>%
 
 Creating new variables.
 ```{r}
-#Creating education variables (highest level completed)
+#Education
 pp_df %<>%
-  mutate(
-    lessprimary = ifelse(nivacad==0 | nivacad==1, 1,0),
-    
-    primary = case_when(
-    nivacad==2 | nivacad==6 ~ 1,
-    TRUE ~ 0),
-    
-  secondary = case_when(
-    nivacad==3 | nivacad==7 ~ 1,
-    TRUE ~ 0),
-  
-  highschool = case_when(
-    nivacad==4 | nivacad==8 ~ 1,
-    TRUE ~ 0),
-  
-  morehighschool = case_when(
-  nivacad > 8 ~ 1,
-  TRUE ~ 0))
+mutate(educat = as.factor(case_when(
+  nivacad <= 1 ~ 1, 
+  nivacad==2 | nivacad==6 ~ 2,
+   nivacad==3 | nivacad==7 ~ 3,
+   nivacad %in% c(4,5,8) ~ 4,
+   nivacad > 8 ~ 5)))
+```
 
+```{r}
+pp_df <- recipe(id_viv ~., data=pp_df) %>%
+  step_dummy(educat, one_hot=TRUE) %>%
+  prep(training=pp_df) %>%
+  bake(new_data = pp_df)
+
+pp_df %<>%
+  rename(lessprimary = educat_X1, primary=educat_X2, secondary=educat_X3, highschool=educat_X4, morehighschool=educat_X5)
+```
+
+```{r}
 #Creating age variables
 #Categories: 0-17,18-29, 30-44, 45-64, 65plus
 pp_df %<>%
@@ -635,6 +635,7 @@ ENT 21 is Puebla
 ## Preparing data for raking
 
 Merging household and individual datasets.
+
 ```{r}
 merged <- hh_df %>%
   left_join(pp_df, by=c("id_viv", "ent"))
@@ -675,10 +676,10 @@ merged_rake <- merged %>%
 
 #Education categories for raking
 educat = case_when(
-  nivacad < 1 ~ 1, 
+  nivacad <= 1 ~ 1, 
   nivacad==2 | nivacad==6 ~ 2,
    nivacad==3 | nivacad==7 ~ 3,
-   nivacad==4 | nivacad==8 ~ 4,
+   nivacad %in% c(4,5,8) ~ 4,
    nivacad > 8 ~ 5),
 #Collapse wealth 4 and 5 (low rate for 5)
   wealth = fct_recode(wealth, "4" = "5"),
@@ -709,11 +710,11 @@ merged_jal <- merged %>%
   
 #Education categories for raking
 educat = case_when(
-  nivacad < 1 ~ 1, 
-  nivacad==2 | nivacad==6 ~ 2,
-   nivacad==3 | nivacad==7 ~ 3,
-   nivacad==4 | nivacad==8 ~ 4,
-   nivacad > 8 ~ 5),
+  lessprimary==1 ~ 1, 
+  primary==1 ~ 2,
+  secondary==1 ~ 3,
+  highschool==1 ~ 4,
+  morehighschool==1 ~ 5),
 #Collapse wealth 4 and 5 (low rate for 5)
   wealth = recode(wealth, `5` = "4"),
 
@@ -760,7 +761,7 @@ raking <- anesrake(list_weights,
          choosemethod = "total",
          type = "pctlim", 
          pctlim = .05 , 
-         nlim = 5)
+         nlim = 10)
 ```
 
 
@@ -768,7 +769,7 @@ raking <- anesrake(list_weights,
 raking_summary <- summary(raking)
 ```
 
-General design effect: 1.134
+General design effect: 1.13
 ```{r}
 raking_summary$general.design.effect
 ```
@@ -778,7 +779,6 @@ Targets are now correct!
 ```{r}
 raking_summary$educat
 ```
-
 
 ## Puebla
 
@@ -795,7 +795,7 @@ merged_pue <- merged %>%
   edad>=65 ~ 5),
 #Education categories for raking
 educat = case_when(
-  nivacad < 1 ~ 1, 
+  nivacad <= 1 ~ 1, 
   nivacad==2 | nivacad==6 ~ 2,
    nivacad==3 | nivacad==7 ~ 3,
    nivacad==4 | nivacad==8 ~ 4,
@@ -849,17 +849,17 @@ raking2 <- anesrake(list_weights,
 
 
 ```{r}
-#raking_summary2 <- summary(raking2)
+raking_summary2 <- summary(raking2)
 ```
 
 General design effect: 1.134
 ```{r}
-#raking_summary2$general.design.effect
+raking_summary2$general.design.effect
 ```
 
 Targets are now correct!
 ```{r}
-#raking_summary2$educat
+raking_summary2$educat
 ```
 
 ## Adding weights back to survey data
